@@ -1,0 +1,22 @@
+{
+  "name": "combrief",
+  "version": "0.1.0",
+  "description": "Tray status lights for AI coding apps",
+  "main": "dist/main/index.js",
+  "private": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && node scripts/copy-extensions.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "npm run build && node scripts/start.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

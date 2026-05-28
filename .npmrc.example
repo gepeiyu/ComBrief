@@ -1,0 +1,4 @@
+# Copy to .npmrc if Electron download is slow in your region:
+# cp .npmrc.example .npmrc
+#
+# electron_mirror=https://npmmirror.com/mirrors/electron/
