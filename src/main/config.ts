@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getAppDefinition } from './apps/registry';
+import { resolveLocale, type Locale } from './i18n';
 import { normalizeTrayAbbrev } from './tray-icons';
 
 export interface CombriefConfig {
@@ -19,6 +20,8 @@ export interface CombriefConfig {
   showTrayAbbrev: boolean;
   /** 按 appId 覆盖默认缩写：最多 2 字母或 1 汉字 */
   trayAbbrevs: Record<string, string>;
+  /** UI language */
+  locale: Locale;
   apps: string[];
 }
 
@@ -56,6 +59,7 @@ export function defaultConfig(): CombriefConfig {
     launchAtLogin: false,
     showTrayAbbrev: true,
     trayAbbrevs: {},
+    locale: 'en',
     apps: [],
   };
 }
@@ -76,6 +80,7 @@ export function loadConfig(home = combriefHome()): CombriefConfig {
     showTrayAbbrev: raw.showTrayAbbrev ?? base.showTrayAbbrev,
     eventLoggingEnabled: raw.eventLoggingEnabled ?? base.eventLoggingEnabled,
     trayAbbrevs: { ...base.trayAbbrevs, ...raw.trayAbbrevs },
+    locale: resolveLocale(raw.locale ?? base.locale),
   };
 }
 

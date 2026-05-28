@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('combrief', {
   uninstallApp: (id: string) => ipcRenderer.invoke('apps:uninstall', id),
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch: object) => ipcRenderer.invoke('config:set', patch),
+  getMessages: () => ipcRenderer.invoke('i18n:messages'),
 });

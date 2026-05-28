@@ -16,6 +16,7 @@ import {
 } from './config';
 import { applyLaunchAtLogin } from './login-item';
 import { createCombriefServer } from './http-server';
+import { getMessages, getRendererMessages, resolveLocale } from './i18n';
 import { TrayManager } from './tray-manager';
 import { APP_REGISTRY } from './apps/registry';
 
@@ -33,16 +34,29 @@ function prepareRuntimeConfig(cfg: CombriefConfig): CombriefConfig {
   return next;
 }
 
+function settingsMessages(): ReturnType<typeof getMessages> {
+  return getMessages(resolveLocale(controller.getConfig().locale));
+}
+
+function applySettingsWindowChrome(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const m = settingsMessages();
+  mainWindow.setTitle(m.settings.windowTitle);
+}
+
 function openSettings(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    applySettingsWindowChrome();
     mainWindow.focus();
     return;
   }
 
+  const m = settingsMessages();
   mainWindow = new BrowserWindow({
     width: 420,
-    height: 520,
+    height: 560,
     resizable: false,
+    title: m.settings.windowTitle,
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'settings-preload.js'),
       contextIsolation: true,
@@ -89,9 +103,16 @@ function registerIpc(): void {
     if (typeof partial.launchAtLogin === 'boolean') {
       applyLaunchAtLogin(partial.launchAtLogin);
     }
+    if (partial.locale) {
+      applySettingsWindowChrome();
+    }
     saveConfig(combriefHome(), cfg);
     return cfg;
   });
+
+  ipcMain.handle('i18n:messages', () =>
+    getRendererMessages(resolveLocale(controller.getConfig().locale)),
+  );
 }
 
 app.whenReady().then(async () => {

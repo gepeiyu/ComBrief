@@ -1,5 +1,6 @@
 import { Menu, Tray } from 'electron';
 import { showAboutWindow } from './about-window';
+import { getMessages, type Messages } from './i18n';
 import { showSystemNotification } from './system-notification';
 import { getAppDefinition } from './apps/registry';
 import { getHubTrayIcon, getTrayIcon, statusToColor } from './tray-icons';
@@ -7,12 +8,10 @@ import type { LightStatus } from './state-machine';
 
 const HUB_ID = '__hub__';
 
-const STATUS_LABELS: Record<LightStatus, string> = {
-  idle: '空闲',
-  working: '工作中',
-  waiting_user: '等待确认',
-  offline: '离线',
-};
+interface TrayMenuOptions {
+  onReinstall?: () => void;
+  onRemove?: () => void;
+}
 
 interface TrayEntry {
   tray: Tray;
@@ -23,6 +22,8 @@ interface TrayEntry {
 
 export class TrayManager {
   private entries = new Map<string, TrayEntry>();
+  private appMenuOptions = new Map<string, TrayMenuOptions>();
+  private messages: Messages = getMessages('en');
   private onOpenSettings?: () => void;
   private onQuit?: () => void;
   private resolveTrayAbbrev: (appId: string) => string = () => '';
@@ -33,6 +34,11 @@ export class TrayManager {
   }) {
     this.onOpenSettings = options?.onOpenSettings;
     this.onQuit = options?.onQuit;
+  }
+
+  setMessages(messages: Messages): void {
+    this.messages = messages;
+    this.refreshAllMenus();
   }
 
   setTrayAbbrevResolver(fn: (appId: string) => string): void {
@@ -47,39 +53,51 @@ export class TrayManager {
     }
   }
 
-  /** Always-visible menu bar / tray anchor (macOS especially). */
+  refreshAllMenus(): void {
+    for (const [appId, entry] of this.entries) {
+      if (appId === HUB_ID) {
+        this.applyHubMenu(entry.tray);
+        continue;
+      }
+      const options = this.appMenuOptions.get(appId);
+      this.applyAppMenu(appId, entry, options);
+      entry.tray.setToolTip(
+        `${getAppDefinition(appId).displayName} — ${this.messages.status[entry.status]}`,
+      );
+    }
+  }
+
   ensureHubTray(): Tray {
     const existing = this.entries.get(HUB_ID);
-    if (existing) return existing.tray;
+    if (existing) {
+      this.applyHubMenu(existing.tray);
+      return existing.tray;
+    }
 
     const tray = new Tray(getHubTrayIcon());
-    tray.setToolTip('ComBrief — 右键打开设置，添加 AI App');
     tray.setTitle('');
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'ComBrief', enabled: false },
-        {
-          label: '设置…',
-          click: () => this.onOpenSettings?.(),
-        },
-        {
-          label: '关于',
-          click: () => showAboutWindow(),
-        },
-        { type: 'separator' },
-        {
-          label: '退出 ComBrief',
-          click: () => this.onQuit?.(),
-        },
-      ]),
-    );
     this.entries.set(HUB_ID, {
       tray,
       status: 'offline',
       frameIndex: 0,
       lastUpdatedAt: Date.now(),
     });
+    this.applyHubMenu(tray);
     return tray;
+  }
+
+  private applyHubMenu(tray: Tray): void {
+    const m = this.messages.tray;
+    tray.setToolTip(this.messages.tray.hubTooltip);
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'ComBrief', enabled: false },
+        { label: m.settings, click: () => this.onOpenSettings?.() },
+        { label: m.about, click: () => showAboutWindow(this.messages) },
+        { type: 'separator' },
+        { label: m.quit, click: () => this.onQuit?.() },
+      ]),
+    );
   }
 
   private applyTrayVisual(
@@ -95,6 +113,32 @@ export class TrayManager {
     tray.setTitle('');
   }
 
+  private applyAppMenu(
+    appId: string,
+    entry: TrayEntry,
+    options?: TrayMenuOptions,
+  ): void {
+    const app = getAppDefinition(appId);
+    const m = this.messages.tray;
+    const statusLabel = this.messages.status[entry.status];
+    entry.tray.setContextMenu(
+      Menu.buildFromTemplate([
+        {
+          label: `${statusLabel} · ${new Date(entry.lastUpdatedAt).toLocaleTimeString()}`,
+          enabled: false,
+        },
+        { type: 'separator' },
+        { label: m.appSettings, click: () => this.onOpenSettings?.() },
+        { label: m.reinstallHooks, click: () => options?.onReinstall?.() },
+        { label: m.removeApp, click: () => options?.onRemove?.() },
+        { type: 'separator' },
+        { label: m.about, click: () => showAboutWindow(this.messages) },
+        { label: m.quit, click: () => this.onQuit?.() },
+      ]),
+    );
+    entry.tray.setToolTip(`${app.displayName} — ${statusLabel}`);
+  }
+
   removeHubTray(): void {
     const entry = this.entries.get(HUB_ID);
     if (!entry) return;
@@ -106,9 +150,7 @@ export class TrayManager {
     const existing = this.entries.get(appId);
     if (existing) return existing.tray;
 
-    const app = getAppDefinition(appId);
     const tray = new Tray(getTrayIcon('gray', 0));
-    tray.setToolTip(app.displayName);
     this.entries.set(appId, {
       tray,
       status: 'offline',
@@ -122,12 +164,13 @@ export class TrayManager {
   setStatus(
     appId: string,
     status: LightStatus,
-    options?: { onReinstall?: () => void; onRemove?: () => void },
+    options?: TrayMenuOptions,
   ): void {
     const tray = this.ensureTray(appId);
-    const app = getAppDefinition(appId);
     const entry = this.entries.get(appId)!;
-    // 同类状态刷新（如连续 preToolUse）时不重置帧，否则呼吸/快闪动画无法推进
+    if (options) {
+      this.appMenuOptions.set(appId, options);
+    }
     if (entry.status !== status) {
       entry.frameIndex = 0;
     }
@@ -135,38 +178,7 @@ export class TrayManager {
     entry.lastUpdatedAt = Date.now();
 
     this.applyTrayVisual(tray, status, entry.frameIndex, appId);
-    tray.setToolTip(`${app.displayName} — ${STATUS_LABELS[status]}`);
-
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        {
-          label: `${STATUS_LABELS[status]} · ${new Date(entry.lastUpdatedAt).toLocaleTimeString()}`,
-          enabled: false,
-        },
-        { type: 'separator' },
-        {
-          label: 'ComBrief 设置…',
-          click: () => this.onOpenSettings?.(),
-        },
-        {
-          label: '重新安装 Hooks',
-          click: () => options?.onReinstall?.(),
-        },
-        {
-          label: '移除此 App',
-          click: () => options?.onRemove?.(),
-        },
-        { type: 'separator' },
-        {
-          label: '关于',
-          click: () => showAboutWindow(),
-        },
-        {
-          label: '退出 ComBrief',
-          click: () => this.onQuit?.(),
-        },
-      ]),
-    );
+    this.applyAppMenu(appId, entry, this.appMenuOptions.get(appId));
   }
 
   removeTray(appId: string): void {
@@ -175,6 +187,7 @@ export class TrayManager {
     if (!entry) return;
     entry.tray.destroy();
     this.entries.delete(appId);
+    this.appMenuOptions.delete(appId);
   }
 
   tickAnimations(): void {
@@ -190,8 +203,8 @@ export class TrayManager {
   notify(displayName: string, enabled: boolean): void {
     if (!enabled) return;
     showSystemNotification(
-      `${displayName} 需要你`,
-      '请返回确认运行命令或继续对话',
+      this.messages.notify.title(displayName),
+      this.messages.notify.body,
     );
   }
 

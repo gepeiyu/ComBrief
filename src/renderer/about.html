@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>关于</title>
+    <title>About</title>
     <style>
       * {
         box-sizing: border-box;
@@ -63,7 +63,7 @@
   <body>
     <h1>ComBrief</h1>
     <p class="version" id="version"></p>
-    <p class="desc">为 Cursor、Claude Code 等 AI 工具显示菜单栏状态灯。</p>
+    <p class="desc" id="desc"></p>
     <a
       class="repo"
       id="repo"
@@ -73,13 +73,40 @@
       >https://github.com/gepeiyu/ComBrief</a
     >
     <div class="actions">
-      <button type="button" id="ok">好</button>
+      <button type="button" id="ok"></button>
     </div>
     <script>
       const params = new URLSearchParams(location.search);
-      document.getElementById('version').textContent =
-        '版本 ' + (params.get('v') || '—');
-      document.getElementById('ok').onclick = () => window.close();
+      const versionEl = document.getElementById('version');
+      const okBtn = document.getElementById('ok');
+      okBtn.onclick = () => window.close();
+
+      async function init() {
+        const m = window.combrief
+          ? await window.combrief.getMessages()
+          : null;
+        if (m) {
+          document.documentElement.lang =
+            m.about.windowTitle === '关于'
+              ? 'zh-CN'
+              : m.about.windowTitle.includes('について')
+                ? 'ja'
+                : 'en';
+          document.title = m.about.windowTitle;
+          document.getElementById('desc').textContent = m.about.description;
+          okBtn.textContent = m.about.ok;
+          versionEl.textContent =
+            m.about.versionPrefix +
+            ' ' +
+            (params.get('v') || '—');
+        } else {
+          versionEl.textContent = 'Version ' + (params.get('v') || '—');
+          document.getElementById('desc').textContent =
+            'Menu bar status lights for Cursor, Claude Code, and other AI tools.';
+          okBtn.textContent = 'OK';
+        }
+      }
+      void init();
     </script>
   </body>
 </html>

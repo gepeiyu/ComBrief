@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>ComBrief 设置</title>
+    <title>ComBrief Settings</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -67,28 +67,45 @@
         font-size: 13px;
         text-align: center;
       }
+      select#locale {
+        margin-left: 8px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        font-size: 13px;
+      }
     </style>
   </head>
   <body>
     <h1>ComBrief</h1>
-    <p class="hint">
-      添加 App 后，<strong>菜单栏</strong>会出现对应状态灯（灰/绿/黄/红圆点）。未添加时仅显示一个灰色圆点。
-    </p>
+    <p id="hint" class="hint"></p>
     <p id="error" class="error" hidden></p>
     <div id="apps"></div>
     <hr />
-    <label
-      ><input type="checkbox" id="notifications" /> 红灯时系统通知</label
+    <label id="label-language"
+      ><span id="text-language"></span>
+      <select id="locale">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+        <option value="ja">日本語</option>
+      </select></label
     >
     <label
-      ><input type="checkbox" id="launchAtLogin" /> 开机自启</label
-    >
+      ><input type="checkbox" id="notifications" />
+      <span id="text-notifications"></span
+    ></label>
     <label
-      ><input type="checkbox" id="showTrayAbbrev" /> 圆点内显示缩写</label
-    >
+      ><input type="checkbox" id="launchAtLogin" />
+      <span id="text-launchAtLogin"></span
+    ></label>
     <label
-      ><input type="checkbox" id="eventLogging" /> 写入调试日志（~/.combrief/logs）</label
-    >
+      ><input type="checkbox" id="showTrayAbbrev" />
+      <span id="text-showTrayAbbrev"></span
+    ></label>
+    <label
+      ><input type="checkbox" id="eventLogging" />
+      <span id="text-eventLogging"></span
+    ></label>
     <div id="abbrevs" class="abbrevs"></div>
     <script src="settings.js"></script>
   </body>

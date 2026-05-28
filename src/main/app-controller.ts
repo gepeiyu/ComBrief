@@ -6,6 +6,7 @@ import {
   resolveEventLoggingEnabled,
   resolveTrayAbbrev,
 } from './config';
+import { getMessages, resolveLocale } from './i18n';
 import { getAppDefinition } from './apps/registry';
 import { installApp, uninstallApp } from './installer/install-app';
 import { expandHomePath } from './installer/paths';
@@ -31,9 +32,14 @@ export class AppController {
     private trayManager: TrayManager,
   ) {
     this.notifications = new NotificationService(30_000);
+    this.trayManager.setMessages(getMessages(resolveLocale(this.cfg.locale)));
     this.trayManager.setTrayAbbrevResolver((appId) =>
       resolveTrayAbbrev(appId, this.cfg),
     );
+  }
+
+  private uiMessages() {
+    return getMessages(resolveLocale(this.cfg.locale));
   }
 
   bootstrapRegisteredApps(): void {
@@ -148,17 +154,24 @@ export class AppController {
   }
 
   updateConfig(patch: Partial<CombriefConfig>): void {
+    const prevLocale = this.cfg.locale;
     this.cfg = {
       ...this.cfg,
       ...patch,
       trayAbbrevs: patch.trayAbbrevs
         ? { ...this.cfg.trayAbbrevs, ...patch.trayAbbrevs }
         : this.cfg.trayAbbrevs,
+      locale: patch.locale
+        ? resolveLocale(patch.locale)
+        : this.cfg.locale,
     };
     this.notifications = new NotificationService(30_000);
     this.trayManager.setTrayAbbrevResolver((appId) =>
       resolveTrayAbbrev(appId, this.cfg),
     );
+    if (patch.locale && resolveLocale(patch.locale) !== prevLocale) {
+      this.trayManager.setMessages(this.uiMessages());
+    }
   }
 
   private trayCallbacks(appId: string) {
@@ -168,15 +181,17 @@ export class AppController {
         const hooksPath = expandHomePath(app.hooksConfigRelPath);
         try {
           installApp(appId);
+          const m = this.uiMessages();
           this.trayManager.showMessage(
-            'ComBrief',
-            `${app.displayName} Hooks 已重新安装\n${hooksPath}`,
+            m.app.hooksReinstalledTitle,
+            m.app.hooksReinstalledBody(app.displayName, hooksPath),
           );
         } catch (err) {
+          const m = this.uiMessages();
           const message =
-            err instanceof Error ? err.message : '未知错误';
+            err instanceof Error ? err.message : m.app.unknownError;
           this.trayManager.showMessage(
-            'ComBrief — 安装失败',
+            m.app.installFailedTitle,
             `${app.displayName}: ${message}`,
           );
         }

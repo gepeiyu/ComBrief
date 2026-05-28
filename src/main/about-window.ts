@@ -1,10 +1,12 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
+import type { Messages } from './i18n';
 
 let aboutWindow: BrowserWindow | null = null;
 
-export function showAboutWindow(): void {
+export function showAboutWindow(messages: Messages): void {
   if (aboutWindow && !aboutWindow.isDestroyed()) {
+    aboutWindow.setTitle(messages.about.windowTitle);
     aboutWindow.focus();
     return;
   }
@@ -16,9 +18,10 @@ export function showAboutWindow(): void {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    title: '关于',
+    title: messages.about.windowTitle,
     show: false,
     webPreferences: {
+      preload: join(__dirname, '..', 'preload', 'settings-preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },

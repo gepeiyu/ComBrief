@@ -23,6 +23,7 @@ describe('config', () => {
     expect(cfg.port).toBe(3847);
     expect(cfg.heartbeatTimeoutMs).toBe(45_000);
     expect(cfg.apps).toEqual([]);
+    expect(cfg.locale).toBe('en');
   });
 
   it('round-trips save', () => {
