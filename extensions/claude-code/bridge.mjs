@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { request } from 'node:http';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const APP_ID = process.env.COMBRIEF_APP_ID ?? 'claude-code';
+const APP_ID = 'claude-code';
 const home = join(homedir(), '.combrief');
 
 function eventLoggingEnabled(config) {
@@ -53,15 +54,15 @@ const EVENT_MAP = {
   BeforeShellExecution: 'beforeShellExecution',
   AfterShellExecution: 'afterShellExecution',
   Stop: 'stop',
-  PermissionRequest: 'permissionRequest',
   AgentResponse: 'afterAgentResponse',
   AgentThought: 'afterAgentResponse',
 };
 
 function resolveHookEvent(input) {
   return (
-    process.env.CURSOR_HOOK_EVENT ??
+    process.argv[2] ??
     process.env.CLAUDE_HOOK_EVENT ??
+    process.env.CURSOR_HOOK_EVENT ??
     input.hook_event_name ??
     input.hook_event ??
     null
@@ -86,6 +87,32 @@ function buildMeta(event, input) {
   return Object.keys(meta).length ? meta : undefined;
 }
 
+function postJson(config, body) {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname: '127.0.0.1',
+        port: config.port,
+        path: '/v1/state',
+        method: 'POST',
+        timeout: 2_500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          Authorization: `Bearer ${config.token}`,
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('request timeout')));
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
 async function reportState(config, event, input) {
   const meta = buildMeta(event, input);
   const body = JSON.stringify({
@@ -95,21 +122,11 @@ async function reportState(config, event, input) {
     sessionId: input.conversation_id ?? input.session_id,
     ...(meta ? { meta } : {}),
   });
-  const url = `http://127.0.0.1:${config.port}/v1/state`;
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${config.token}`,
-  };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body,
-        signal: AbortSignal.timeout(2_500),
-      });
-      if (!res.ok) {
-        logError(config, `report ${event} HTTP ${res.status}`);
+      const status = await postJson(config, body);
+      if (status < 200 || status >= 300) {
+        logError(config, `report ${event} HTTP ${status}`);
       }
       return;
     } catch (err) {
@@ -152,6 +169,10 @@ if (existsSync(join(home, 'config.json'))) {
   } else if (rawEvent) {
     logError(config, `unmapped hook event: ${rawEvent}`);
   }
+}
+
+if (normalized === 'beforeSubmitPrompt') {
+  process.stdout.write(`${JSON.stringify({ continue: true })}\n`);
 }
 
 process.exit(runChain(input));

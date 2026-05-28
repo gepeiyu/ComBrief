@@ -31,6 +31,7 @@ import {
   type ClaudeSettingsFile,
 } from './settings-json';
 import { appBackupDir, appInstallDir, bridgeScriptPath, expandHomePath } from './paths';
+import { resolveNodeExecutable, writeWindowsBridgeCmd } from './node-resolve';
 
 function extensionsSourceDir(appId: string): string {
   const candidates = [
@@ -67,16 +68,18 @@ function writeJsonFile(path: string, data: unknown): void {
   writeFileSync(path, JSON.stringify(data, null, 2));
 }
 
-function copyBridgeFiles(appId: string, destDir: string): void {
+function copyBridgeFiles(appId: string, destDir: string): string | undefined {
   const src = extensionsSourceDir(appId);
   mkdirSync(destDir, { recursive: true });
-  cpSync(join(src, 'bridge.mjs'), join(destDir, 'bridge.mjs'));
-  if (existsSync(join(src, 'bridge.cmd'))) {
-    cpSync(join(src, 'bridge.cmd'), join(destDir, 'bridge.cmd'));
+  const bridgePath = join(destDir, 'bridge.mjs');
+  cpSync(join(src, 'bridge.mjs'), bridgePath);
+  if (process.platform === 'win32') {
+    const nodePath = resolveNodeExecutable();
+    writeWindowsBridgeCmd(join(destDir, 'bridge.cmd'), nodePath, bridgePath);
+    return nodePath;
   }
-  if (process.platform !== 'win32') {
-    chmodSync(join(destDir, 'bridge.mjs'), 0o755);
-  }
+  chmodSync(bridgePath, 0o755);
+  return undefined;
 }
 
 export interface InstallResult {
@@ -94,14 +97,14 @@ export function installApp(appId: string): InstallResult {
   const backupPath = backupConfig(configPath, appId);
 
   const installDir = appInstallDir(appId);
-  copyBridgeFiles(appId, installDir);
+  const nodePath = copyBridgeFiles(appId, installDir);
 
   const bridgePath = bridgeScriptPath(appId);
   let chainCommands: string[] = [];
 
   if (app.kind === 'cursor-hooks-json') {
     const current = readJsonFile(configPath, emptyCursorHooks());
-    chainCommands = collectChainCommands(current);
+    chainCommands = collectChainCommands(current, bridgePath);
     const next = injectCursorBridge(current, bridgePath, appId);
     writeJsonFile(configPath, next);
   } else {
@@ -109,7 +112,7 @@ export function installApp(appId: string): InstallResult {
       configPath,
       emptyClaudeSettings(),
     );
-    chainCommands = collectClaudeChainCommands(current);
+    chainCommands = collectClaudeChainCommands(current, bridgePath);
     const next = injectClaudeBridge(current, bridgePath, appId);
     writeJsonFile(configPath, next);
   }
@@ -128,6 +131,7 @@ export function installApp(appId: string): InstallResult {
         bridgePath,
         configPath,
         backupPath,
+        ...(nodePath ? { nodePath } : {}),
         installedAt: new Date().toISOString(),
       },
       null,
@@ -151,9 +155,9 @@ export function uninstallApp(appId: string): void {
   // 只移除 ComBrief 条目，不还原安装时整文件备份（避免覆盖用户之后的 hook 修改）
   if (existsSync(configPath)) {
     if (app.kind === 'cursor-hooks-json') {
-      writeJsonFile(configPath, removeCursorFromFile(configPath));
+      writeJsonFile(configPath, removeCursorFromFile(configPath, bridgeScriptPath(appId)));
     } else {
-      writeJsonFile(configPath, removeClaudeFromFile(configPath));
+      writeJsonFile(configPath, removeClaudeFromFile(configPath, bridgeScriptPath(appId)));
     }
   }
 
@@ -165,12 +169,18 @@ export function uninstallApp(appId: string): void {
   });
 }
 
-function removeCursorFromFile(configPath: string): CursorHooksFile {
+function removeCursorFromFile(
+  configPath: string,
+  bridgePath: string,
+): CursorHooksFile {
   const current = readJsonFile(configPath, emptyCursorHooks());
-  return removeCursorBridge(current);
+  return removeCursorBridge(current, bridgePath);
 }
 
-function removeClaudeFromFile(configPath: string): ClaudeSettingsFile {
+function removeClaudeFromFile(
+  configPath: string,
+  bridgePath: string,
+): ClaudeSettingsFile {
   const current = readJsonFile(configPath, emptyClaudeSettings());
-  return removeClaudeBridge(current);
+  return removeClaudeBridge(current, bridgePath);
 }

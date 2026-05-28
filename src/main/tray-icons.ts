@@ -105,20 +105,13 @@ function writePixel(
 ): void {
   if (x < 0 || y < 0 || x >= ICON_SIZE || y >= ICON_SIZE || a <= 0) return;
   const i = (y * ICON_SIZE + x) * 4;
-  if (process.platform === 'darwin') {
-    buf[i] = b;
-    buf[i + 1] = g;
-    buf[i + 2] = r;
-    buf[i + 3] = a;
-  } else {
-    buf[i] = r;
-    buf[i + 1] = g;
-    buf[i + 2] = b;
-    buf[i + 3] = a;
-  }
+  buf[i] = b;
+  buf[i + 1] = g;
+  buf[i + 2] = r;
+  buf[i + 3] = a;
 }
 
-function iconFromBitmap(color: IconColor, brightness: number): Buffer {
+export function iconFromBitmap(color: IconColor, brightness: number): Buffer {
   const r = Math.min(255, Math.round(COLORS[color][0] * brightness));
   const g = Math.min(255, Math.round(COLORS[color][1] * brightness));
   const b = Math.min(255, Math.round(COLORS[color][2] * brightness));
@@ -223,7 +216,7 @@ function bitmapTrayImage(
   if (latinAbbrev) {
     drawLatinAbbrevOnBitmap(buf, latinAbbrev);
   }
-  const image = nativeImage.createFromBuffer(buf, {
+  const image = nativeImage.createFromBitmap(buf, {
     width: ICON_SIZE,
     height: ICON_SIZE,
     scaleFactor: SCALE,

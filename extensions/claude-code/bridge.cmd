@@ -1,2 +1,2 @@
 @echo off
-node "%~dp0bridge.mjs"
+node "%~dp0bridge.mjs" %*

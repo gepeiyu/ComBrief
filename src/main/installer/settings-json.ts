@@ -1,5 +1,3 @@
-import { COMBRIEF_MARKER } from './hooks-json';
-
 export const CLAUDE_EVENTS = [
   'SessionStart',
   'SessionEnd',
@@ -8,13 +6,11 @@ export const CLAUDE_EVENTS = [
   'PostToolUse',
   'PostToolUseFailure',
   'Stop',
-  'PermissionRequest',
 ] as const;
 
 export interface ClaudeHookCommand {
   type: 'command';
   command: string;
-  env?: Record<string, string>;
 }
 
 export interface ClaudeHookGroup {
@@ -27,18 +23,38 @@ export interface ClaudeSettingsFile {
   [key: string]: unknown;
 }
 
-function isCombriefCommand(cmd: ClaudeHookCommand): boolean {
-  return cmd.env?.COMBRIEF_MARKER === COMBRIEF_MARKER;
+export function formatClaudeHookCommand(path: string, event?: string): string {
+  const command =
+    process.platform === 'win32'
+      ? `"${path.replace(/\\/g, '/').replace(/"/g, '\\"')}"`
+      : path;
+  return event ? `${command} ${event}` : command;
+}
+
+function normalizeHookCommand(command: string): string {
+  const match = command.trim().match(/^"([^"]+)"|^(\S+)/);
+  return (match?.[1] ?? match?.[2] ?? '')
+    .replace(/\\/g, '/')
+    .toLowerCase();
+}
+
+function isCombriefCommand(
+  cmd: ClaudeHookCommand,
+  bridgePath?: string,
+): boolean {
+  if (!bridgePath) return false;
+  return normalizeHookCommand(cmd.command) === normalizeHookCommand(formatClaudeHookCommand(bridgePath));
 }
 
 export function collectClaudeChainCommands(
   settings: ClaudeSettingsFile,
+  bridgePath?: string,
 ): string[] {
   const commands = new Set<string>();
   for (const groups of Object.values(settings.hooks ?? {})) {
     for (const group of groups) {
       for (const cmd of group.hooks ?? []) {
-        if (!isCombriefCommand(cmd) && cmd.command) {
+        if (!isCombriefCommand(cmd, bridgePath) && cmd.command) {
           commands.add(cmd.command);
         }
       }
@@ -52,24 +68,21 @@ export function injectClaudeBridge(
   bridgePath: string,
   appId: string,
 ): ClaudeSettingsFile {
-  const next: ClaudeSettingsFile = structuredClone(settings);
+  const next = removeClaudeBridge(settings, bridgePath);
   next.hooks ??= {};
 
   for (const event of CLAUDE_EVENTS) {
     const cmd: ClaudeHookCommand = {
       type: 'command',
-      command: bridgePath,
-      env: {
-        CLAUDE_HOOK_EVENT: event,
-        COMBRIEF_APP_ID: appId,
-        COMBRIEF_MARKER,
-      },
+      command: formatClaudeHookCommand(bridgePath, event),
     };
 
     const groups = (next.hooks[event] ?? [])
       .map((group) => ({
         ...group,
-        hooks: (group.hooks ?? []).filter((h) => !isCombriefCommand(h)),
+        hooks: (group.hooks ?? []).filter(
+          (h) => !isCombriefCommand(h, bridgePath),
+        ),
       }))
       .filter((group) => group.hooks.length > 0);
 
@@ -82,6 +95,7 @@ export function injectClaudeBridge(
 
 export function removeClaudeBridge(
   settings: ClaudeSettingsFile,
+  bridgePath: string,
 ): ClaudeSettingsFile {
   const next: ClaudeSettingsFile = structuredClone(settings);
   if (!next.hooks) return next;
@@ -90,7 +104,9 @@ export function removeClaudeBridge(
     const groups = (next.hooks[event] ?? [])
       .map((group) => ({
         ...group,
-        hooks: (group.hooks ?? []).filter((h) => !isCombriefCommand(h)),
+        hooks: (group.hooks ?? []).filter(
+          (h) => !isCombriefCommand(h, bridgePath),
+        ),
       }))
       .filter((group) => group.hooks.length > 0);
     if (groups.length === 0) {
