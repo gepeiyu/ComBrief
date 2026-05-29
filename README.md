@@ -26,6 +26,16 @@ Other versions: [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases).
 
 After installation, launch ComBrief from the menu bar / system tray.
 
+#### macOS: “was not opened” warning?
+
+Release builds are not Apple-notarized yet. macOS may block the first launch after downloading from GitHub—this is expected.
+
+1. Click **Done** on the dialog (do not click **Move to Trash**).
+2. Open **System Settings → Privacy & Security**, scroll down, and if you see **“Open ‘ComBrief.app’ anyway”**, click it and confirm.
+3. Open ComBrief from **Applications** again. If it is still blocked, **Control-click ComBrief → Open** (or right-click → Open).
+
+On Intel Macs, use **ComBrief-0.1.0.dmg**; on Apple Silicon, use **ComBrief-0.1.0-arm64.dmg**.
+
 ### Setup
 
 1. Open **ComBrief Settings**, click **Add**, and choose Cursor or Claude Code (hooks are installed automatically).

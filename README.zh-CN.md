@@ -26,6 +26,16 @@
 
 安装后从菜单栏 / 托盘打开 ComBrief。
 
+#### macOS：提示「未打开」？
+
+当前 Release 尚未做 Apple 公证，从 GitHub 下载后 macOS 可能拦截首次打开，属正常现象。
+
+1. 在弹窗中点 **「完成」** 关掉窗口（不要点「移到废纸篓」）。
+2. 打开 **系统设置 → 隐私与安全性**，往下滚动，若出现 **「仍要打开 “ComBrief.app”」**，点它并确认。
+3. 在「应用程序」中再次打开 ComBrief；若仍被拦，可 **按住 Control 点 ComBrief → 打开**（或右键 → 打开）。
+
+Intel Mac 请下 **ComBrief-0.1.0.dmg**；Apple Silicon 请下 **ComBrief-0.1.0-arm64.dmg**。
+
 ### 配置
 
 1. 打开 **ComBrief 设置**，点击 **添加**，选择 Cursor 或 Claude Code（会自动写入 Hooks）。
