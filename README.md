@@ -59,6 +59,18 @@ In settings you can switch the UI to **English / 中文 / 日本語** (default: 
 
 ### Installers (for friends)
 
+Download the installer for your platform from **[GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest)**:
+
+| Platform | File | Notes |
+|----------|------|--------|
+| macOS (Intel) | `ComBrief-x.y.z.dmg` | no `-arm64` suffix |
+| macOS (Apple Silicon) | `ComBrief-x.y.z-arm64.dmg` | M-series Macs |
+| Windows | `ComBrief Setup x.y.z.exe` | NSIS installer |
+
+After installing, open ComBrief and add Cursor / Claude Code in settings. [Node.js](https://nodejs.org) 20+ must still be installed on the machine (hooks invoke `node`).
+
+#### Build from source
+
 Build on the target OS (**build Windows installers on Windows**):
 
 ```bash
@@ -66,7 +78,7 @@ npm install
 npm run dist
 ```
 
-Output is under `release/`, or [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases) (macOS: `ComBrief-x.y.z.dmg` for Intel, `ComBrief-x.y.z-arm64.dmg` for Apple Silicon; Windows: `.exe` installer). Node.js must still be installed on the machine.
+Output is under `release/` with the same filenames as above. Pushing a `v*` tag triggers CI to publish to Releases.
 
 ## Configuration
 

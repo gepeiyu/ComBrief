@@ -59,14 +59,26 @@ npm start
 
 ### 安装包（推荐给朋友）
 
-在目标系统上构建（**Windows 安装包请在 Windows 上** `npm run dist`）：
+从 **[GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest)** 下载对应平台的安装包：
+
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| macOS（Intel） | `ComBrief-x.y.z.dmg` | 无 `-arm64` 后缀 |
+| macOS（Apple Silicon） | `ComBrief-x.y.z-arm64.dmg` | M 系列芯片 |
+| Windows | `ComBrief Setup x.y.z.exe` | NSIS 安装程序 |
+
+安装后打开 ComBrief，在设置里添加 Cursor / Claude Code。对方机器仍需安装 [Node.js](https://nodejs.org) 20+（Hooks 脚本会用到）。
+
+#### 从源码自行打包
+
+在目标系统上构建（**Windows 安装包请在 Windows 上**执行）：
 
 ```bash
 npm install
 npm run dist
 ```
 
-产物在 `release/` 目录，或 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases)（macOS：`ComBrief-x.y.z.dmg` 为 Intel，`ComBrief-x.y.z-arm64.dmg` 为 Apple Silicon；Windows：`.exe` 安装程序）。对方机器仍需安装 Node.js。
+产物在 `release/` 目录，文件名与上表相同。打 tag 推送后 CI 会自动发布到 Releases。
 
 ## 配置
 
