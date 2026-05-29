@@ -38,7 +38,8 @@ jobs:
 
       - run: npm ci
       - run: npm test
-      - run: npm run dist
+      # 有 tag 时 electron-builder 会尝试自动 publish 到 GitHub，需 GH_TOKEN；由下方 publish job 上传
+      - run: npm run build && npx electron-builder --publish never
 
       - name: Upload macOS artifacts
         if: runner.os == 'macOS'
@@ -48,7 +49,7 @@ jobs:
           path: |
             release/*.dmg
             release/*.dmg.blockmap
-            release/latest-mac.yml
+            release/latest*.yml
 
       - name: Upload Windows artifacts
         if: runner.os == 'Windows'
