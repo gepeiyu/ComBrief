@@ -6,30 +6,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## 为什么需要 ComBrief
-
-Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，IDE 里不一定显眼。ComBrief 通过官方 **Hooks** 把状态同步到托盘：**一眼四色灯**，需要时还有系统通知。
-
-## 状态灯
-
-| 颜色 | 含义 |
-|------|------|
-| 灰 | 会话已结束（离线） |
-| 绿 | 在线空闲，当前没有进行中的 Agent 回合 |
-| 黄 | 本回合进行中（思考、规划、跑工具） |
-| 红 | 需要你确认（Run / 权限对话框等） |
-
-规则完全由 Hook 事件驱动，不做「几秒没动静就猜空闲」——避免规划下一步时误变绿灯。详见 [docs/STATE-RULES.md](docs/STATE-RULES.md)（中文）。
-
-## 支持的 App
-
-| App | 配置文件 | 状态 |
-|-----|----------|------|
-| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` | 支持 |
-| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | 支持 |
-
-每个 App **独立一盏灯**（可自定义圆点内缩写，如 `C` / `CC`）。
-
 ## 快速开始
 
 ### 环境
@@ -37,25 +13,6 @@ Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，ID
 - **macOS** 或 **Windows**
 - [Node.js](https://nodejs.org) 20+（Hooks 脚本会调用系统里的 `node`）
 - [Cursor](https://cursor.com) 和/或 Claude Code CLI
-
-### 从源码运行（开发 / 自测）
-
-```bash
-git clone https://github.com/gepeiyu/ComBrief.git
-cd ComBrief
-npm install
-
-# 可选：国内加速 Electron 下载
-# cp .npmrc.example .npmrc
-
-npm start
-```
-
-1. 在托盘打开 **ComBrief 设置**，点击 **添加** Cursor 或 Claude Code。  
-2. **新开一次** Agent 会话（装 Hooks 前的旧会话可能不会上报）。  
-3. 菜单栏 / 托盘区应出现对应状态灯（macOS 可能在 `^` 折叠区里）。
-
-设置中可将界面语言切换为 **English / 中文 / 日本語**（默认 English）。
 
 ### 安装包（推荐给朋友）
 
@@ -79,6 +36,51 @@ npm run dist
 ```
 
 产物在 `release/` 目录，文件名与上表相同。打 tag 推送后 CI 会自动发布到 Releases。
+
+### 使用
+
+1. 在托盘打开 **ComBrief 设置**，点击 **添加** Cursor 或 Claude Code。  
+2. **新开一次** Agent 会话（装 Hooks 前的旧会话可能不会上报）。  
+3. 菜单栏 / 托盘区应出现对应状态灯（macOS 可能在 `^` 折叠区里）。
+
+设置中可将界面语言切换为 **English / 中文 / 日本語**（默认 English）。
+
+### 从源码运行（开发 / 自测）
+
+```bash
+git clone https://github.com/gepeiyu/ComBrief.git
+cd ComBrief
+npm install
+
+# 可选：国内加速 Electron 下载
+# cp .npmrc.example .npmrc
+
+npm start
+```
+
+## 为什么需要 ComBrief
+
+Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，IDE 里不一定显眼。ComBrief 通过官方 **Hooks** 把状态同步到托盘：**一眼四色灯**，需要时还有系统通知。
+
+## 状态灯
+
+| 颜色 | 含义 |
+|------|------|
+| 灰 | 会话已结束（离线） |
+| 绿 | 在线空闲，当前没有进行中的 Agent 回合 |
+| 黄 | 本回合进行中（思考、规划、跑工具） |
+| 红 | 需要你确认（Run / 权限对话框等） |
+
+规则完全由 Hook 事件驱动，不做「几秒没动静就猜空闲」——避免规划下一步时误变绿灯。详见 [docs/STATE-RULES.md](docs/STATE-RULES.md)（中文）。
+
+## 支持的 App
+
+| App | 配置文件 | 状态 |
+|-----|----------|------|
+| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` | 支持 |
+| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | 支持 |
+
+每个 App **独立一盏灯**（可自定义圆点内缩写，如 `C` / `CC`）。
 
 ## 配置
 

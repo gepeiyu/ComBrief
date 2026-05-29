@@ -6,30 +6,6 @@ Menu bar / system tray status lights for **Cursor**, **Claude Code**, and other 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Why ComBrief
-
-When an agent runs tools in the background, waits for you to click **Run**, or is “planning next,” it is easy to miss in the IDE. ComBrief uses official **Hooks** to mirror state in the tray: **four colors at a glance**, with optional system notifications.
-
-## Status lights
-
-| Color | Meaning |
-|-------|---------|
-| Gray | Session ended (offline) |
-| Green | Online and idle—no agent turn in progress |
-| Yellow | Turn in progress (thinking, planning, running tools) |
-| Red | Needs your approval (Run, permission dialog, etc.) |
-
-Rules are driven only by hook events—no “guess idle after N seconds,” which avoids false greens during planning. See [docs/STATE-RULES.md](docs/STATE-RULES.md) (Chinese).
-
-## Supported apps
-
-| App | Config file | Status |
-|-----|-------------|--------|
-| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` | Supported |
-| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | Supported |
-
-Each app gets **its own light** (optional abbreviation inside the dot, e.g. `C` / `CC`).
-
 ## Quick start
 
 ### Requirements
@@ -37,25 +13,6 @@ Each app gets **its own light** (optional abbreviation inside the dot, e.g. `C` 
 - **macOS** or **Windows**
 - [Node.js](https://nodejs.org) 20+ (hook scripts invoke `node` on your PATH)
 - [Cursor](https://cursor.com) and/or Claude Code CLI
-
-### Run from source (dev / self-test)
-
-```bash
-git clone https://github.com/gepeiyu/ComBrief.git
-cd ComBrief
-npm install
-
-# Optional: faster Electron downloads in some regions
-# cp .npmrc.example .npmrc
-
-npm start
-```
-
-1. Open **ComBrief Settings** from the tray and **Add** Cursor or Claude Code.  
-2. **Start a new** agent session (sessions opened before hooks were installed may not report).  
-3. Status dots should appear in the menu bar / tray (on macOS they may live under the `^` overflow).
-
-In settings you can switch the UI to **English / 中文 / 日本語** (default: English).
 
 ### Installers (for friends)
 
@@ -79,6 +36,51 @@ npm run dist
 ```
 
 Output is under `release/` with the same filenames as above. Pushing a `v*` tag triggers CI to publish to Releases.
+
+### Usage
+
+1. Open **ComBrief Settings** from the tray and **Add** Cursor or Claude Code.  
+2. **Start a new** agent session (sessions opened before hooks were installed may not report).  
+3. Status dots should appear in the menu bar / tray (on macOS they may live under the `^` overflow).
+
+In settings you can switch the UI to **English / 中文 / 日本語** (default: English).
+
+### Run from source (dev / self-test)
+
+```bash
+git clone https://github.com/gepeiyu/ComBrief.git
+cd ComBrief
+npm install
+
+# Optional: faster Electron downloads in some regions
+# cp .npmrc.example .npmrc
+
+npm start
+```
+
+## Why ComBrief
+
+When an agent runs tools in the background, waits for you to click **Run**, or is “planning next,” it is easy to miss in the IDE. ComBrief uses official **Hooks** to mirror state in the tray: **four colors at a glance**, with optional system notifications.
+
+## Status lights
+
+| Color | Meaning |
+|-------|---------|
+| Gray | Session ended (offline) |
+| Green | Online and idle—no agent turn in progress |
+| Yellow | Turn in progress (thinking, planning, running tools) |
+| Red | Needs your approval (Run, permission dialog, etc.) |
+
+Rules are driven only by hook events—no “guess idle after N seconds,” which avoids false greens during planning. See [docs/STATE-RULES.md](docs/STATE-RULES.md) (Chinese).
+
+## Supported apps
+
+| App | Config file | Status |
+|-----|-------------|--------|
+| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` | Supported |
+| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | Supported |
+
+Each app gets **its own light** (optional abbreviation inside the dot, e.g. `C` / `CC`).
 
 ## Configuration
 
