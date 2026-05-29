@@ -66,7 +66,7 @@ npm install
 npm run dist
 ```
 
-产物在 `release/` 目录（macOS：`.dmg`，Windows：`.exe` 安装程序）。对方机器仍需安装 Node.js。
+产物在 `release/` 目录，或 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases)（macOS：`ComBrief-x.y.z.dmg` 为 Intel，`ComBrief-x.y.z-arm64.dmg` 为 Apple Silicon；Windows：`.exe` 安装程序）。对方机器仍需安装 Node.js。
 
 ## 配置
 

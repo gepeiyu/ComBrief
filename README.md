@@ -66,7 +66,7 @@ npm install
 npm run dist
 ```
 
-Output is under `release/` (macOS: `.dmg`, Windows: `.exe` installer). Node.js must still be installed on the machine.
+Output is under `release/`, or [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases) (macOS: `ComBrief-x.y.z.dmg` for Intel, `ComBrief-x.y.z-arm64.dmg` for Apple Silicon; Windows: `.exe` installer). Node.js must still be installed on the machine.
 
 ## Configuration
 
