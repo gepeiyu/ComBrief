@@ -49,23 +49,21 @@ describe('reduceState — planning stays yellow', () => {
 });
 
 describe('reduceState — waiting user', () => {
-  it('permissionRequest → waiting_user', () => {
-    expect(reduceState('working', 'permissionRequest')).toBe('waiting_user');
+  it('permissionRequest stays working until pending timeout', () => {
+    expect(reduceState('working', 'permissionRequest')).toBe('working');
   });
 
-  it('permission_denied postToolUseFailure → waiting_user', () => {
+  it('permission_denied postToolUseFailure stays working until pending timeout', () => {
     expect(
       reduceState('working', 'postToolUseFailure', {
         failureType: 'permission_denied',
       }),
-    ).toBe('waiting_user');
+    ).toBe('working');
   });
 
-  it('beforeShellExecution does not change state', () => {
+  it('beforeShellExecution returns to working from waiting_user', () => {
     expect(reduceState('working', 'beforeShellExecution')).toBe('working');
-    expect(reduceState('waiting_user', 'beforeShellExecution')).toBe(
-      'waiting_user',
-    );
+    expect(reduceState('waiting_user', 'beforeShellExecution')).toBe('working');
   });
 
   it('preToolUse does not immediately go red', () => {
@@ -96,6 +94,18 @@ describe('applyPendingApprovalTimeout', () => {
       pendingApprovalSince: 0,
     };
     expect(applyPendingApprovalTimeout(app, 5_000, 5_500).status).toBe(
+      'waiting_user',
+    );
+  });
+
+  it('turns working into waiting_user after permissionRequest delay', () => {
+    const app = {
+      status: 'working' as const,
+      lastEventAt: 0,
+      lastHeartbeatAt: 0,
+      pendingApprovalSince: 1_000,
+    };
+    expect(applyPendingApprovalTimeout(app, 5_000, 6_500).status).toBe(
       'waiting_user',
     );
   });

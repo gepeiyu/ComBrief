@@ -117,6 +117,9 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   registerQuitHandlers();
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('app.combrief');
+  }
   if (process.platform === 'darwin' && app.dock) {
     app.dock.hide();
   }

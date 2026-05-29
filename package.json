@@ -2,6 +2,11 @@
   "name": "combrief",
   "version": "0.1.0",
   "description": "Tray status lights for AI coding apps",
+  "author": {
+    "name": "gepeiyu",
+    "email": "gepeiyu@gmail.com",
+    "url": "https://github.com/gepeiyu"
+  },
   "main": "dist/main/index.js",
   "private": false,
   "scripts": {

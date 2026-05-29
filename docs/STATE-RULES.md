@@ -28,7 +28,7 @@
 | `beforeSubmitPrompt` | 黄（回合开始） |
 | `preToolUse` / `postToolUse` | 黄 |
 | `postToolUseFailure` | 拒权→红；否则黄 |
-| `beforeShellExecution` | 保持当前（不单独升红，避免自动 Run 误报） |
+| `beforeShellExecution` | 保持当前；若已是红灯则→黄（Run 后命令开始执行） |
 | `afterShellExecution` | 黄 |
 | `afterAgentResponse` | **黄** |
 | `afterAgentThought` | **黄** |
@@ -44,13 +44,15 @@
 | `UserPromptSubmit` | 黄 |
 | `PreToolUse` / `PostToolUse` | 黄 |
 | `PostToolUseFailure` | 拒权→红；否则黄 |
-| `PermissionRequest` | 红 |
+| `PermissionRequest` | 黄（超时后红） |
 | `Stop` | **绿** |
 
-## 红灯（仅两种来源）
+## 红灯（两种来源，均延迟 `pendingToolApprovalMs`）
 
 1. **`PermissionRequest`**（CC）— 权限对话框  
-2. **Shell/MCP 的 `preToolUse` 后超过 `pendingToolApprovalMs`（默认 5s）仍无 `postToolUse`** — 视为在等 Run（Cursor 自动执行的命令通常 &lt;5s 完成，不误报）
+2. **Shell/MCP 的 `preToolUse`，或 `postToolUseFailure`（`permission_denied`）** — 超过 `pendingToolApprovalMs`（默认 5s）仍无 `postToolUse` / 未解除
+
+以上事件先保持**黄灯**，超时后再变红，避免自动 Run 或瞬时拒权误报。
 
 通知仅在 **进入红灯** 时发送。
 

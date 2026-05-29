@@ -12,7 +12,8 @@ export type Messages = {
     removeApp: string;
   };
   notify: {
-    title: (displayName: string) => string;
+    title: () => string;
+    subtitle: (displayName: string) => string;
     body: string;
   };
   settings: {
@@ -63,7 +64,8 @@ const en: Messages = {
     removeApp: 'Remove This App',
   },
   notify: {
-    title: (displayName) => `${displayName} needs you`,
+    title: () => 'ComBrief',
+    subtitle: (displayName) => `${displayName} needs you`,
     body: 'Return to approve a command or continue the conversation',
   },
   settings: {
@@ -116,7 +118,8 @@ const zh: Messages = {
     removeApp: '移除此 App',
   },
   notify: {
-    title: (displayName) => `${displayName} 需要你`,
+    title: () => 'ComBrief',
+    subtitle: (displayName) => `${displayName} 需要你`,
     body: '请返回确认运行命令或继续对话',
   },
   settings: {
@@ -169,7 +172,8 @@ const ja: Messages = {
     removeApp: 'この App を削除',
   },
   notify: {
-    title: (displayName) => `${displayName} — 確認が必要です`,
+    title: () => 'ComBrief',
+    subtitle: (displayName) => `${displayName} — 確認が必要です`,
     body: 'コマンドの承認または会話の続行をお願いします',
   },
   settings: {

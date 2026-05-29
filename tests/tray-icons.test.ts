@@ -18,8 +18,8 @@ describe('tray-icons breathing', () => {
 describe('tray-icons bitmap', () => {
   it('writes center pixels as BGRA', () => {
     const buf = iconFromBitmap('red', 1);
-    const iconSize = 40;
-    const center = (20 * iconSize + 20) * 4;
+    const iconSize = 44;
+    const center = (22 * iconSize + 22) * 4;
 
     expect([...buf.subarray(center, center + 4)]).toEqual([45, 45, 255, 255]);
   });

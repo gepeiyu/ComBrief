@@ -66,11 +66,15 @@ export function reduceState(
       return 'idle';
 
     case 'permissionRequest':
-      return 'waiting_user';
+      if (current === 'offline') return current;
+      if (current === 'waiting_user') return 'waiting_user';
+      return 'working';
 
     case 'postToolUseFailure':
       if (meta?.failureType === 'permission_denied') {
-        return 'waiting_user';
+        if (current === 'offline') return current;
+        if (current === 'waiting_user') return 'waiting_user';
+        return 'working';
       }
       return duringTurn(current);
 
@@ -78,7 +82,8 @@ export function reduceState(
       return duringTurn(current);
 
     case 'beforeShellExecution':
-      return current;
+      // 用户已点 Run、命令开始跑 → 回到黄灯（避免执行过程中一直红灯）
+      return current === 'waiting_user' ? 'working' : current;
 
     case 'preToolUse':
       if (current === 'waiting_user') return 'waiting_user';
@@ -109,9 +114,16 @@ export function updatePendingApproval(
   switch (event) {
     case 'preToolUse':
       return needsRunApproval(meta?.toolName) ? timestamp : pendingApprovalSince;
-    case 'postToolUse':
+    case 'permissionRequest':
+      return pendingApprovalSince ?? timestamp;
     case 'postToolUseFailure':
+      if (meta?.failureType === 'permission_denied') {
+        return pendingApprovalSince ?? timestamp;
+      }
+      return null;
+    case 'postToolUse':
     case 'afterShellExecution':
+    case 'beforeShellExecution':
     case 'stop':
     case 'sessionEnd':
     case 'beforeSubmitPrompt':

@@ -2,12 +2,19 @@ appId: app.combrief
 productName: ComBrief
 directories:
   output: release
+  buildResources: build
 files:
   - dist/**/*
   - package.json
+  - build/icon.png
 mac:
   target: dmg
   category: public.app-category.utilities
+  icon: build/icon.png
+  # 签名：设置 CSC_LINK + CSC_KEY_PASSWORD 环境变量后 electron-builder 自动签名
+  # 公证：设置 APPLE_ID、APPLE_APP_SPECIFIC_PASSWORD、APPLE_TEAM_ID
 win:
   target: nsis
+  icon: build/icon.png
   signAndEditExecutable: false
+  # 签名：设置 WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD（或共用 CSC_LINK）

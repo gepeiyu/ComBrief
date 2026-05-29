@@ -3,7 +3,7 @@ import { nativeImage, type NativeImage } from 'electron';
 export type IconColor = 'green' | 'yellow' | 'red' | 'gray';
 
 /** 逻辑尺寸；位图按 2x 绘制以适配 Retina */
-const LOGICAL_SIZE = 20;
+const LOGICAL_SIZE = 22;
 const SCALE = 2;
 const ICON_SIZE = LOGICAL_SIZE * SCALE;
 
@@ -196,7 +196,7 @@ function iconFromSvgHan(
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 ${LOGICAL_SIZE} ${LOGICAL_SIZE}">` +
     `<circle cx="${cx}" cy="${cx}" r="${r}" fill="${circleFill(color, brightness)}"/>` +
-    `<text x="${cx}" y="${cx + 1}" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, sans-serif" font-size="11" fill="#ffffff">${escapeXml(han)}</text>` +
+    `<text x="${cx}" y="${cx + 1}" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, sans-serif" font-size="12" fill="#ffffff">${escapeXml(han)}</text>` +
     `</svg>`;
   const image = nativeImage.createFromDataURL(
     `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,

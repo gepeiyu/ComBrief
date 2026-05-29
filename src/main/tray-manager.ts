@@ -202,13 +202,15 @@ export class TrayManager {
 
   notify(displayName: string, enabled: boolean): void {
     if (!enabled) return;
-    showSystemNotification(
-      this.messages.notify.title(displayName),
-      this.messages.notify.body,
-    );
+    const m = this.messages.notify;
+    showSystemNotification({
+      title: m.title(),
+      subtitle: m.subtitle(displayName),
+      body: m.body,
+    });
   }
 
   showMessage(title: string, body: string): void {
-    showSystemNotification(title, body);
+    showSystemNotification({ title, body });
   }
 }
