@@ -16,13 +16,13 @@ Menu bar / system tray status lights for **Cursor**, **Claude Code**, and other 
 
 ### Download
 
-Get the installer for your platform from [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest):
+| Platform | Download |
+|----------|----------|
+| macOS (Intel) | [ComBrief-0.1.0.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0.dmg) |
+| macOS (Apple Silicon) | [ComBrief-0.1.0-arm64.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0-arm64.dmg) |
+| Windows | [ComBrief Setup 0.1.0.exe](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief.Setup.0.1.0.exe) |
 
-| Platform | File | Notes |
-|----------|------|--------|
-| macOS (Intel) | `ComBrief-x.y.z.dmg` | filename has no `-arm64` suffix |
-| macOS (Apple Silicon) | `ComBrief-x.y.z-arm64.dmg` | M-series Macs |
-| Windows | `ComBrief Setup x.y.z.exe` | NSIS installer |
+Other versions: [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases).
 
 After installation, launch ComBrief from the menu bar / system tray.
 

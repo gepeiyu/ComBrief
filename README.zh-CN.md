@@ -16,13 +16,13 @@
 
 ### 下载安装
 
-在 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest) 下载与你系统匹配的安装包：
+| 平台 | 下载 |
+|------|------|
+| macOS（Intel） | [ComBrief-0.1.0.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0.dmg) |
+| macOS（Apple Silicon） | [ComBrief-0.1.0-arm64.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0-arm64.dmg) |
+| Windows | [ComBrief Setup 0.1.0.exe](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief.Setup.0.1.0.exe) |
 
-| 平台 | 文件 | 说明 |
-|------|------|------|
-| macOS（Intel） | `ComBrief-x.y.z.dmg` | 文件名无 `-arm64` 后缀 |
-| macOS（Apple Silicon） | `ComBrief-x.y.z-arm64.dmg` | M 系列芯片 |
-| Windows | `ComBrief Setup x.y.z.exe` | NSIS 安装程序 |
+更多版本见 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases)。
 
 安装后从菜单栏 / 托盘打开 ComBrief。
 
