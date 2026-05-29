@@ -8,55 +8,31 @@
 
 ## 快速开始
 
-### 环境
+### 环境要求
 
 - **macOS** 或 **Windows**
-- [Node.js](https://nodejs.org) 20+（Hooks 脚本会调用系统里的 `node`）
-- [Cursor](https://cursor.com) 和/或 Claude Code CLI
+- [Node.js](https://nodejs.org) 20+（Hooks 通过系统 `node` 上报状态）
+- [Cursor](https://cursor.com) 和/或 [Claude Code](https://code.claude.com)
 
-### 安装包（推荐给朋友）
+### 下载安装
 
-从 **[GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest)** 下载对应平台的安装包：
+在 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases/latest) 下载与你系统匹配的安装包：
 
 | 平台 | 文件 | 说明 |
 |------|------|------|
-| macOS（Intel） | `ComBrief-x.y.z.dmg` | 无 `-arm64` 后缀 |
+| macOS（Intel） | `ComBrief-x.y.z.dmg` | 文件名无 `-arm64` 后缀 |
 | macOS（Apple Silicon） | `ComBrief-x.y.z-arm64.dmg` | M 系列芯片 |
 | Windows | `ComBrief Setup x.y.z.exe` | NSIS 安装程序 |
 
-安装后打开 ComBrief，在设置里添加 Cursor / Claude Code。对方机器仍需安装 [Node.js](https://nodejs.org) 20+（Hooks 脚本会用到）。
+安装后从菜单栏 / 托盘打开 ComBrief。
 
-#### 从源码自行打包
+### 配置
 
-在目标系统上构建（**Windows 安装包请在 Windows 上**执行）：
+1. 打开 **ComBrief 设置**，点击 **添加**，选择 Cursor 或 Claude Code（会自动写入 Hooks）。
+2. **新开一次** Agent 会话（安装 Hooks 之前已打开的会话可能不会上报状态）。
+3. 托盘区会出现对应状态灯（macOS 可能在 `^` 折叠区）。
 
-```bash
-npm install
-npm run dist
-```
-
-产物在 `release/` 目录，文件名与上表相同。打 tag 推送后 CI 会自动发布到 Releases。
-
-### 使用
-
-1. 在托盘打开 **ComBrief 设置**，点击 **添加** Cursor 或 Claude Code。  
-2. **新开一次** Agent 会话（装 Hooks 前的旧会话可能不会上报）。  
-3. 菜单栏 / 托盘区应出现对应状态灯（macOS 可能在 `^` 折叠区里）。
-
-设置中可将界面语言切换为 **English / 中文 / 日本語**（默认 English）。
-
-### 从源码运行（开发 / 自测）
-
-```bash
-git clone https://github.com/gepeiyu/ComBrief.git
-cd ComBrief
-npm install
-
-# 可选：国内加速 Electron 下载
-# cp .npmrc.example .npmrc
-
-npm start
-```
+可在设置中切换界面语言：**English / 中文 / 日本語**（默认 English）。
 
 ## 为什么需要 ComBrief
 
@@ -71,18 +47,18 @@ Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，ID
 | 黄 | 本回合进行中（思考、规划、跑工具） |
 | 红 | 需要你确认（Run / 权限对话框等） |
 
-规则完全由 Hook 事件驱动，不做「几秒没动静就猜空闲」——避免规划下一步时误变绿灯。详见 [docs/STATE-RULES.md](docs/STATE-RULES.md)（中文）。
+规则完全由 Hook 事件驱动，不做「几秒没动静就猜空闲」——避免规划下一步时误变绿灯。详见 [docs/STATE-RULES.md](docs/STATE-RULES.md)。
 
 ## 支持的 App
 
-| App | 配置文件 | 状态 |
-|-----|----------|------|
-| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` | 支持 |
-| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | 支持 |
+| App | 配置文件 |
+|-----|----------|
+| [Cursor](https://cursor.com) | `~/.cursor/hooks.json` |
+| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` |
 
-每个 App **独立一盏灯**（可自定义圆点内缩写，如 `C` / `CC`）。
+每个 App **独立一盏灯**，可在设置中自定义圆点内缩写（如 `C` / `CC`）。
 
-## 配置
+## 配置项
 
 数据目录：`~/.combrief/`
 
@@ -90,9 +66,9 @@ Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，ID
 |------|------|
 | `config.json` | 端口、Token、已注册 App、语言、通知开关等 |
 | `apps/<appId>/` | Bridge 脚本与安装清单 |
-| `backups/<appId>/` | 安装时的配置备份（**仅供手动恢复**） |
+| `backups/<appId>/` | 安装时的配置备份（仅供手动恢复） |
 
-常用可调项（`config.json`）：
+`config.json` 常用项：
 
 - `locale` — 界面语言：`en` / `zh` / `ja`（默认 `en`）
 - `notificationsEnabled` — 红灯时系统通知（默认开）
@@ -103,8 +79,8 @@ Agent 在后台跑工具、等你点 **Run**、或在「planning next」时，ID
 
 ComBrief **不会覆盖**你现有的 Hooks 配置：
 
-- **安装 / 重装**：先备份，再**追加**带 `COMBRIEF_MARKER` 的 Bridge 条目；你的其它 hook 保留。  
-- **卸载 / 移除 App**：**只删除** ComBrief 条目，不用安装备份整文件覆盖，避免丢失你之后的修改。  
+- **安装 / 重装**：先备份，再**追加**带 `COMBRIEF_MARKER` 的 Bridge 条目；你的其它 hook 保留。
+- **卸载 / 移除 App**：**只删除** ComBrief 条目，不用安装备份整文件覆盖，避免丢失你之后的修改。
 - Bridge 上报失败时 **fail-open**，不阻断 Cursor / Claude Code 正常工作。
 
 ## 架构概览
@@ -122,19 +98,19 @@ Cursor / Claude Code
 ## 开发
 
 ```bash
-npm test              # 单元测试
-npm run build         # 编译 TypeScript
-npm run pack          # 免安装目录（release/）
-npm run dist          # 安装包
+git clone https://github.com/gepeiyu/ComBrief.git
+cd ComBrief
+npm install
+npm test
+npm start          # 本地运行
+npm run dist       # 本地打包
 ```
 
-更多文档：
-
-- [状态灯规则](docs/STATE-RULES.md)
+更多文档：[状态灯规则](docs/STATE-RULES.md)
 
 ## 参与贡献
 
-欢迎 Issue 与 Pull Request。大改动请先开 Issue 讨论状态机或 Hook 映射，避免与 [STATE-RULES.md](docs/STATE-RULES.md) 的设计意图冲突。
+欢迎 Issue 与 Pull Request。涉及状态机或 Hook 映射的大改动请先开 Issue，与 [STATE-RULES.md](docs/STATE-RULES.md) 的设计保持一致。
 
 ## 许可证
 
