@@ -117,6 +117,7 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   registerQuitHandlers();
+  app.setName('ComBrief');
   if (process.platform === 'win32') {
     app.setAppUserModelId('app.combrief');
   }

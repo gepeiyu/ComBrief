@@ -6,6 +6,7 @@ import { join } from 'node:path';
 export function resolveAppIconPath(): string | undefined {
   const candidates = [
     join(process.resourcesPath, 'build', 'icon.png'),
+    join(process.resourcesPath, 'icon.icns'),
     join(app.getAppPath(), 'build', 'icon.png'),
     join(__dirname, '..', '..', 'build', 'icon.png'),
   ];

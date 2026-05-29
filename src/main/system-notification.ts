@@ -12,6 +12,7 @@ function escapeAppleScriptString(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+/** osascript 无法自定义图标，仅作 Electron 通知失败时的兜底 */
 function notifyViaOsascript(options: SystemNotificationOptions): void {
   const subtitle = options.subtitle
     ? ` subtitle "${escapeAppleScriptString(options.subtitle)}"`
@@ -20,25 +21,31 @@ function notifyViaOsascript(options: SystemNotificationOptions): void {
     `display notification "${escapeAppleScriptString(options.body)}" ` +
     `with title "${escapeAppleScriptString(options.title)}"${subtitle}`;
   execFile('osascript', ['-e', script], () => {
-    // ignore errors (e.g. sandbox); Electron path may still work
+    // ignore errors
   });
 }
 
-/** 菜单栏应用在开发态下 Electron Notification 常被系统忽略，macOS 用 osascript 更可靠 */
+/**
+ * macOS 须走 Electron Notification 才会显示应用 bundle 图标；
+ * osascript 的通知归属脚本进程，图标不是 ComBrief。
+ */
 export function showSystemNotification(options: SystemNotificationOptions): void {
-  if (process.platform === 'darwin') {
-    notifyViaOsascript(options);
+  if (!Notification.isSupported()) {
+    if (process.platform === 'darwin') notifyViaOsascript(options);
     return;
   }
 
-  if (!Notification.isSupported()) return;
-  const icon = resolveAppIconPath();
-  new Notification({
+  const notification = new Notification({
     title: options.title,
-    body: options.subtitle
-      ? `${options.subtitle}\n${options.body}`
-      : options.body,
-    icon,
+    subtitle: process.platform === 'darwin' ? options.subtitle : undefined,
+    body: options.body,
+    icon: process.platform === 'win32' ? resolveAppIconPath() : undefined,
     silent: false,
-  }).show();
+  });
+
+  notification.on('failed', () => {
+    if (process.platform === 'darwin') notifyViaOsascript(options);
+  });
+
+  notification.show();
 }
