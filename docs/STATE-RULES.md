@@ -28,7 +28,7 @@
 | `beforeSubmitPrompt` | 黄（回合开始） |
 | `preToolUse` / `postToolUse` | 黄 |
 | `postToolUseFailure` | 拒权→红；否则黄 |
-| `beforeShellExecution` | 保持当前；若已是红灯则→黄（Run 后命令开始执行） |
+| `beforeShellExecution` | 保持当前（Cursor 可能在用户点 Allow **之前**就触发，不能用来判断已批准） |
 | `afterShellExecution` | 黄 |
 | `afterAgentResponse` | **黄** |
 | `afterAgentThought` | **黄** |

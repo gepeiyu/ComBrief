@@ -61,9 +61,17 @@ describe('reduceState — waiting user', () => {
     ).toBe('working');
   });
 
-  it('beforeShellExecution returns to working from waiting_user', () => {
+  it('beforeShellExecution does not clear pending or change state', () => {
     expect(reduceState('working', 'beforeShellExecution')).toBe('working');
-    expect(reduceState('waiting_user', 'beforeShellExecution')).toBe('working');
+    expect(reduceState('waiting_user', 'beforeShellExecution')).toBe(
+      'waiting_user',
+    );
+    const pending = updatePendingApproval(
+      'beforeShellExecution',
+      Date.now(),
+      1000,
+    );
+    expect(pending).toBe(1000);
   });
 
   it('preToolUse does not immediately go red', () => {

@@ -82,8 +82,7 @@ export function reduceState(
       return duringTurn(current);
 
     case 'beforeShellExecution':
-      // 用户已点 Run、命令开始跑 → 回到黄灯（避免执行过程中一直红灯）
-      return current === 'waiting_user' ? 'working' : current;
+      return current;
 
     case 'preToolUse':
       if (current === 'waiting_user') return 'waiting_user';
@@ -123,7 +122,6 @@ export function updatePendingApproval(
       return null;
     case 'postToolUse':
     case 'afterShellExecution':
-    case 'beforeShellExecution':
     case 'stop':
     case 'sessionEnd':
     case 'beforeSubmitPrompt':
