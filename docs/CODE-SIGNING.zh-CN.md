@@ -1,6 +1,6 @@
 # ComBrief 代码签名
 
-未签名时应用可以运行，但 macOS 可能提示「无法验证开发者」，Windows 可能触发 SmartScreen。正式发布建议在 CI 或本机配置证书。
+未签名时应用可以运行，但 macOS 可能提示「无法验证开发者」，Windows 可能触发 SmartScreen。正式发布建议在本机配置证书后执行 `npm run dist`。
 
 ## macOS
 
@@ -35,10 +35,6 @@ export WIN_CSC_KEY_PASSWORD=your-pfx-password
 
 3. 在 `electron-builder.yml` 中将 `signAndEditExecutable` 改为 `true`（有证书时）
 4. 构建：`npm run dist`
-
-## GitHub Actions
-
-在仓库 Settings → Secrets 中添加上述变量，Release workflow 构建时会自动使用。本地无证书时可留空，产物仍为未签名安装包。
 
 ## 当前状态
 
