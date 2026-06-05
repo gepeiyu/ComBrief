@@ -14,27 +14,30 @@
 - [Node.js](https://nodejs.org) 20+（Hooks 通过系统 `node` 上报状态）
 - [Cursor](https://cursor.com) 和/或 [Claude Code](https://code.claude.com)
 
-### 下载安装
+### 本地安装
 
-| 平台 | 下载 |
-|------|------|
-| macOS（Intel） | [ComBrief-0.1.0.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0.dmg) |
-| macOS（Apple Silicon） | [ComBrief-0.1.0-arm64.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0-arm64.dmg) |
-| Windows | [ComBrief Setup 0.1.0.exe](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief.Setup.0.1.0.exe) |
+```bash
+git clone https://github.com/gepeiyu/ComBrief.git
+cd ComBrief
+npm install
+npm test          # 可选
+```
 
-更多版本见 [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases)。
+**日常使用**（无需打包）：
 
-安装后从菜单栏 / 托盘打开 ComBrief。
+```bash
+npm start
+```
 
-#### macOS：提示「未打开」？
+从菜单栏 / 托盘打开 ComBrief 即可。
 
-当前 Release 尚未做 Apple 公证，从 GitHub 下载后 macOS 可能拦截首次打开，属正常现象。
+**打包为安装包**（可选）：
 
-1. 在弹窗中点 **「完成」** 关掉窗口（不要点「移到废纸篓」）。
-2. 打开 **系统设置 → 隐私与安全性**，往下滚动，若出现 **「仍要打开 “ComBrief.app”」**，点它并确认。
-3. 在「应用程序」中再次打开 ComBrief；若仍被拦，可 **按住 Control 点 ComBrief → 打开**（或右键 → 打开）。
+```bash
+npm run dist
+```
 
-Intel Mac 请下 **ComBrief-0.1.0.dmg**；Apple Silicon 请下 **ComBrief-0.1.0-arm64.dmg**。
+产物在 `release/` 目录（macOS 为 `.dmg`，Windows 为 `.exe`）。本地构建未经 Apple 公证，macOS 首次打开若被拦截，可在 **系统设置 → 隐私与安全性** 点 **仍要打开**，或 **Control / 右键 → 打开**。
 
 ### 配置
 
@@ -43,6 +46,22 @@ Intel Mac 请下 **ComBrief-0.1.0.dmg**；Apple Silicon 请下 **ComBrief-0.1.0-
 3. 托盘区会出现对应状态灯（macOS 可能在 `^` 折叠区）。
 
 可在设置中切换界面语言：**English / 中文 / 日本語**（默认 English）。
+
+### Slack 远程确认（Claude Code）
+
+外出时若只能使用 **Slack**（无法使用 Claude App），可在 ComBrief 设置中配置 Slack Bot。启用后，**同一次待办会同时出现在本地 CLI 与 Slack 频道**；在任一侧批准或拒绝即可（先处理者获胜），人在电脑前可照常使用本地 Allow，外出则在 Slack 点按钮。
+
+**推荐**：ComBrief 设置 → **Slack 远程确认** → **打开 Slack 配置指南…**，按应用内八步图文操作（文档源文件：[docs/guides/slack-setup.zh-CN.md](docs/guides/slack-setup.zh-CN.md)）。
+
+简要步骤：
+
+1. 在 [Slack API](https://api.slack.com/apps) 创建应用，开启 **Socket Mode**，创建 App Token（`connections:write`）。
+2. Bot Scopes：`chat:write`；私有频道另加 `groups:read`。
+3. 安装到 Workspace，将 Bot 邀请进目标频道，复制 **Channel ID**（`C…`）。
+4. ComBrief 设置 → **Slack 远程确认**：填入 `xoxb-…`、`xapp-…`、Channel ID，启用并发送测试消息。
+5. 在设置中 **重新安装** Claude Code Hooks（或首次添加 Claude Code），以写入 `remote-gate` 脚本。
+
+设计说明见 [docs/specs/2026-06-05-remote-slack-design.md](docs/specs/2026-06-05-remote-slack-design.md)。
 
 ## 为什么需要 ComBrief
 
@@ -105,18 +124,9 @@ Cursor / Claude Code
   ComBrief (Electron) ──► 托盘状态灯 + 通知
 ```
 
-## 开发
+## 更多文档
 
-```bash
-git clone https://github.com/gepeiyu/ComBrief.git
-cd ComBrief
-npm install
-npm test
-npm start          # 本地运行
-npm run dist       # 本地打包
-```
-
-更多文档：[状态灯规则](docs/STATE-RULES.md)
+- [状态灯规则](docs/STATE-RULES.md)
 
 ## 参与贡献
 

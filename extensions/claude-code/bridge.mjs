@@ -77,7 +77,7 @@ function buildMeta(event, input) {
   if (event === 'postToolUseFailure' && input.failure_type) {
     meta.failureType = input.failure_type;
   }
-  if (event === 'preToolUse') {
+  if (event === 'preToolUse' || event === 'postToolUse') {
     const tool =
       input.tool_name ?? input.toolName ?? input.tool ?? input.name;
     if (typeof tool === 'string' && tool) {

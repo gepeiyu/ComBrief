@@ -14,16 +14,36 @@ import {
   saveConfig,
   type CombriefConfig,
 } from './config';
-import { applyLaunchAtLogin } from './login-item';
+import {
+  applyLaunchAtLogin,
+  readLaunchAtLoginState,
+  wasOpenedAtLogin,
+} from './login-item';
 import { createCombriefServer } from './http-server';
-import { getMessages, getRendererMessages, resolveLocale } from './i18n';
+import {
+  getMessages,
+  getRendererMessages,
+  getSlackCardLabels,
+  resolveLocale,
+} from './i18n';
+import { showSlackSetupGuide } from './slack-setup-window';
+import { SlackRuntime } from './slack-runtime';
 import { TrayManager } from './tray-manager';
 import { APP_REGISTRY } from './apps/registry';
 
 let controller: AppController;
 let trayManager: TrayManager;
+let slackRuntime: SlackRuntime;
 let mainWindow: BrowserWindow | null = null;
 const registeredApps = new Set<string>();
+
+function slackCardLabels() {
+  return getSlackCardLabels(resolveLocale(controller.getConfig().locale));
+}
+
+async function restartSlack(): Promise<void> {
+  await slackRuntime.restart();
+}
 
 /** 把日志开关写入 config，供 bridge 子进程读取 */
 function prepareRuntimeConfig(cfg: CombriefConfig): CombriefConfig {
@@ -54,7 +74,7 @@ function openSettings(): void {
   const m = settingsMessages();
   mainWindow = new BrowserWindow({
     width: 420,
-    height: 560,
+    height: 760,
     resizable: false,
     title: m.settings.windowTitle,
     webPreferences: {
@@ -94,20 +114,49 @@ function registerIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle('config:get', () => controller.getConfig());
+  ipcMain.handle('config:get', () => {
+    const cfg = controller.getConfig();
+    const state = readLaunchAtLoginState();
+    if (state.effective !== cfg.launchAtLogin) {
+      controller.updateConfig({ launchAtLogin: state.effective });
+      const synced = controller.getConfig();
+      saveConfig(combriefHome(), synced);
+      return { ...synced, launchAtLoginIssue: state.issue };
+    }
+    return { ...cfg, launchAtLoginIssue: state.issue };
+  });
 
-  ipcMain.handle('config:set', (_e, patch: object) => {
+  ipcMain.handle('config:set', async (_e, patch: object) => {
     const partial = patch as Partial<ReturnType<typeof controller.getConfig>>;
     controller.updateConfig(partial);
-    const cfg = controller.getConfig();
+    let launchAtLoginIssue = null as ReturnType<
+      typeof applyLaunchAtLogin
+    >['issue'];
     if (typeof partial.launchAtLogin === 'boolean') {
-      applyLaunchAtLogin(partial.launchAtLogin);
+      const state = applyLaunchAtLogin(partial.launchAtLogin);
+      launchAtLoginIssue = state.issue;
+      controller.updateConfig({ launchAtLogin: state.effective });
     }
+    const cfg = controller.getConfig();
     if (partial.locale) {
       applySettingsWindowChrome();
     }
+    if (partial.slack !== undefined || partial.locale !== undefined) {
+      await restartSlack();
+    }
     saveConfig(combriefHome(), cfg);
-    return cfg;
+    return { ...cfg, launchAtLoginIssue };
+  });
+
+  ipcMain.handle('slack:status', () => slackRuntime.getStatus());
+
+  ipcMain.handle('slack:test', async () => {
+    await slackRuntime.sendTest();
+    return { ok: true };
+  });
+
+  ipcMain.handle('slack:openSetupGuide', () => {
+    showSlackSetupGuide(resolveLocale(controller.getConfig().locale));
   });
 
   ipcMain.handle('i18n:messages', () =>
@@ -129,8 +178,12 @@ app.whenReady().then(async () => {
     ensureBackgroundWindow();
   }
 
-  const cfg = prepareRuntimeConfig(ensureConfig());
-  applyLaunchAtLogin(cfg.launchAtLogin);
+  let cfg = prepareRuntimeConfig(ensureConfig());
+  const launchState = applyLaunchAtLogin(cfg.launchAtLogin);
+  if (launchState.effective !== cfg.launchAtLogin) {
+    cfg = { ...cfg, launchAtLogin: launchState.effective };
+    saveConfig(combriefHome(), cfg);
+  }
   for (const appId of cfg.apps) registeredApps.add(appId);
 
   trayManager = new TrayManager({
@@ -143,10 +196,22 @@ app.whenReady().then(async () => {
   controller = new AppController(cfg, trayManager);
   controller.bootstrapRegisteredApps();
 
+  slackRuntime = new SlackRuntime(
+    () => controller.getConfig(),
+    slackCardLabels,
+  );
+  await slackRuntime.restart();
+
   const server = createCombriefServer({
     token: cfg.token,
     registeredApps,
-    onState: (payload) => controller.handleState(payload),
+    onState: (payload) => {
+      controller.handleState(payload);
+      slackRuntime.getDecisionService()?.tryResolveFromLocal(payload);
+    },
+    getDecisionService: () => slackRuntime.getDecisionService(),
+    getSlackStatus: () => slackRuntime.getStatus(),
+    onSlackTest: () => slackRuntime.sendTest(),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -159,7 +224,7 @@ app.whenReady().then(async () => {
   setInterval(() => controller.tickTimeouts(), 1000);
   setInterval(() => trayManager.tickAnimations(), 100);
 
-  if (cfg.apps.length === 0) {
+  if (cfg.apps.length === 0 && !wasOpenedAtLogin()) {
     openSettings();
   }
   // Tray app: keep running after the settings window closes (Windows/Linux).

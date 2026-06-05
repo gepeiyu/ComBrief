@@ -46,15 +46,30 @@ function isCombriefCommand(
   return normalizeHookCommand(cmd.command) === normalizeHookCommand(formatClaudeHookCommand(bridgePath));
 }
 
+function isCombriefGateCommand(
+  cmd: ClaudeHookCommand,
+  gatePath?: string,
+): boolean {
+  if (!gatePath) return false;
+  const base = normalizeHookCommand(formatClaudeHookCommand(gatePath));
+  const cmdBase = normalizeHookCommand(cmd.command);
+  return cmdBase === base || cmdBase.startsWith(`${base} `);
+}
+
 export function collectClaudeChainCommands(
   settings: ClaudeSettingsFile,
   bridgePath?: string,
+  gatePath?: string,
 ): string[] {
   const commands = new Set<string>();
   for (const groups of Object.values(settings.hooks ?? {})) {
     for (const group of groups) {
       for (const cmd of group.hooks ?? []) {
-        if (!isCombriefCommand(cmd, bridgePath) && cmd.command) {
+        if (
+          !isCombriefCommand(cmd, bridgePath) &&
+          !isCombriefGateCommand(cmd, gatePath) &&
+          cmd.command
+        ) {
           commands.add(cmd.command);
         }
       }

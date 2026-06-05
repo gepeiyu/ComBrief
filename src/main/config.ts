@@ -5,6 +5,28 @@ import { getAppDefinition } from './apps/registry';
 import { resolveLocale, type Locale } from './i18n';
 import { normalizeTrayAbbrev } from './tray-icons';
 
+export interface SlackConfig {
+  enabled: boolean;
+  botToken: string;
+  appToken: string;
+  channelId: string;
+  decisionTimeoutMs: number;
+  failClosed: boolean;
+  allowedUserIds: string[];
+}
+
+export function defaultSlackConfig(): SlackConfig {
+  return {
+    enabled: false,
+    botToken: '',
+    appToken: '',
+    channelId: '',
+    decisionTimeoutMs: 600_000,
+    failClosed: false,
+    allowedUserIds: [],
+  };
+}
+
 export interface CombriefConfig {
   port: number;
   token: string;
@@ -23,6 +45,7 @@ export interface CombriefConfig {
   /** UI language */
   locale: Locale;
   apps: string[];
+  slack: SlackConfig;
 }
 
 export function resolveEventLoggingEnabled(cfg: CombriefConfig): boolean {
@@ -61,6 +84,7 @@ export function defaultConfig(): CombriefConfig {
     trayAbbrevs: {},
     locale: 'en',
     apps: [],
+    slack: defaultSlackConfig(),
   };
 }
 
@@ -81,6 +105,11 @@ export function loadConfig(home = combriefHome()): CombriefConfig {
     eventLoggingEnabled: raw.eventLoggingEnabled ?? base.eventLoggingEnabled,
     trayAbbrevs: { ...base.trayAbbrevs, ...raw.trayAbbrevs },
     locale: resolveLocale(raw.locale ?? base.locale),
+    slack: {
+      ...base.slack,
+      ...(raw.slack ?? {}),
+      allowedUserIds: raw.slack?.allowedUserIds ?? base.slack.allowedUserIds,
+    },
   };
 }
 

@@ -27,3 +27,10 @@ export function bridgeScriptPath(appId: string): string {
     ? join(base, 'bridge.cmd')
     : join(base, 'bridge.mjs');
 }
+
+export function remoteGateScriptPath(appId: string): string {
+  const base = appInstallDir(appId);
+  return process.platform === 'win32'
+    ? join(base, 'remote-gate.cmd')
+    : join(base, 'remote-gate.mjs');
+}

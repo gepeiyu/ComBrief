@@ -21,6 +21,9 @@ export type Messages = {
     hint: string;
     notifications: string;
     launchAtLogin: string;
+    launchAtLoginFailed: string;
+    launchAtLoginApproval: string;
+    launchAtLoginDisabled: string;
     showTrayAbbrev: string;
     eventLogging: string;
     language: string;
@@ -32,6 +35,33 @@ export type Messages = {
     add: string;
     remove: string;
     connectError: string;
+    slackSection: string;
+    slackEnabled: string;
+    slackBotToken: string;
+    slackAppToken: string;
+    slackChannelId: string;
+    slackTest: string;
+    slackStatusConnected: string;
+    slackStatusDisconnected: string;
+    slackCardTitle: string;
+    slackSetupGuide: string;
+    slackSetupGuideTitle: string;
+  };
+  slackCard: {
+    allowOnce: string;
+    deny: string;
+    allowAlways: (detail: string) => string;
+    resolvedAllowSlack: (userId: string) => string;
+    resolvedAllowLocal: () => string;
+    resolvedAllowAlwaysSlack: (detail: string, userId: string) => string;
+    resolvedAllowAlwaysLocal: (detail: string) => string;
+    resolvedDenySlack: (userId: string) => string;
+    resolvedDenyLocal: () => string;
+    resolvedOptionSlack: (optionLabel: string, userId: string) => string;
+    resolvedOptionLocal: () => string;
+    resolvedAlready: () => string;
+    cardRequestedAt: (time: string) => string;
+    cardResolvedAt: (requested: string, resolved: string) => string;
   };
   about: {
     windowTitle: string;
@@ -73,6 +103,12 @@ const en: Messages = {
     hint: 'After adding an app, a status dot appears in the menu bar (gray / green / yellow / red). With no apps added, only a gray hub dot is shown.',
     notifications: 'System notification on red light',
     launchAtLogin: 'Launch at login',
+    launchAtLoginFailed:
+      'Could not enable launch at login. On Windows, check Task Manager → Startup apps; on macOS, sign and notarize the app or allow it under Login Items.',
+    launchAtLoginApproval:
+      'Allow ComBrief under System Settings → General → Login Items, then turn this on again.',
+    launchAtLoginDisabled:
+      'ComBrief is disabled under Task Manager → Startup apps. Enable it there, then turn this on again.',
     showTrayAbbrev: 'Show abbreviation inside dot',
     eventLogging: 'Write debug logs (~/.combrief/logs)',
     language: 'Language',
@@ -84,6 +120,37 @@ const en: Messages = {
     add: 'Add',
     remove: 'Remove',
     connectError: 'Cannot connect to ComBrief. Please restart the app.',
+    slackSection: 'Slack remote approval (Claude Code)',
+    slackEnabled: 'Enable Slack remote approval',
+    slackBotToken: 'Bot User OAuth Token (xoxb-…)',
+    slackAppToken: 'App-Level Token for Socket Mode (xapp-…)',
+    slackChannelId: 'Channel ID (C… or G… for private)',
+    slackTest: 'Send test message',
+    slackStatusConnected: 'Slack: connected',
+    slackStatusDisconnected: 'Slack: disconnected',
+    slackCardTitle: 'Claude Code needs your approval',
+    slackSetupGuide: 'Open Slack setup guide…',
+    slackSetupGuideTitle: 'Slack remote approval — setup guide',
+  },
+  slackCard: {
+    allowOnce: 'Allow once',
+    deny: 'Deny',
+    allowAlways: (detail) => `Always allow: ${detail}`,
+    resolvedAllowSlack: (userId) => `✅ *Allowed once* — <@${userId}>`,
+    resolvedAllowLocal: () => '✅ *Allowed once* — confirmed on this Mac',
+    resolvedAllowAlwaysSlack: (detail, userId) =>
+      `✅ *Always allow: ${detail}* — <@${userId}>`,
+    resolvedAllowAlwaysLocal: (detail) =>
+      `✅ *Always allow: ${detail}* — confirmed in terminal`,
+    resolvedDenySlack: (userId) => `❌ *Denied* — <@${userId}>`,
+    resolvedDenyLocal: () => '❌ *Denied* — confirmed on this Mac',
+    resolvedOptionSlack: (optionLabel, userId) =>
+      `📌 *Selected: ${optionLabel}* — <@${userId}>`,
+    resolvedOptionLocal: () => '📌 *Confirmed on this Mac*',
+    resolvedAlready: () => 'ℹ️ This request was already handled',
+    cardRequestedAt: (time) => `🕐 *Requested* ${time}`,
+    cardResolvedAt: (requested, resolved) =>
+      `🕐 *Requested* ${requested}  ·  *Handled* ${resolved}`,
   },
   about: {
     windowTitle: 'About',
@@ -127,6 +194,12 @@ const zh: Messages = {
     hint: '添加 App 后，菜单栏会出现对应状态灯（灰/绿/黄/红圆点）。未添加时仅显示一个灰色圆点。',
     notifications: '红灯时系统通知',
     launchAtLogin: '开机自启',
+    launchAtLoginFailed:
+      '未能启用开机自启。Windows 请在任务管理器 → 启动应用 中检查；macOS 需签名公证应用，或在 登录项 中允许。',
+    launchAtLoginApproval:
+      '请在 系统设置 → 通用 → 登录项 中允许 ComBrief，然后重新勾选。',
+    launchAtLoginDisabled:
+      'ComBrief 在任务管理器 → 启动应用 中被禁用，请先启用后再勾选。',
     showTrayAbbrev: '圆点内显示缩写',
     eventLogging: '写入调试日志（~/.combrief/logs）',
     language: '语言',
@@ -138,6 +211,37 @@ const zh: Messages = {
     add: '添加',
     remove: '移除',
     connectError: '无法连接 ComBrief，请重启应用。',
+    slackSection: 'Slack 远程确认（Claude Code）',
+    slackEnabled: '启用 Slack 远程确认',
+    slackBotToken: 'Bot User OAuth Token (xoxb-…)',
+    slackAppToken: 'Socket Mode App Token (xapp-…)',
+    slackChannelId: '频道 ID（私有频道多为 C… 或 G…）',
+    slackTest: '发送测试消息',
+    slackStatusConnected: 'Slack：已连接',
+    slackStatusDisconnected: 'Slack：未连接',
+    slackCardTitle: 'Claude Code 需要你确认',
+    slackSetupGuide: '打开 Slack 配置指南…',
+    slackSetupGuideTitle: 'Slack 远程确认 — 配置指南',
+  },
+  slackCard: {
+    allowOnce: '允许（本次）',
+    deny: '拒绝',
+    allowAlways: (detail) => `始终允许：${detail}`,
+    resolvedAllowSlack: (userId) => `✅ *已允许（本次）* — <@${userId}>`,
+    resolvedAllowLocal: () => '✅ *已允许（本次）* — 本机已确认',
+    resolvedAllowAlwaysSlack: (detail, userId) =>
+      `✅ *始终允许：${detail}* — <@${userId}>`,
+    resolvedAllowAlwaysLocal: (detail) =>
+      `✅ *始终允许：${detail}* — 本机终端已确认`,
+    resolvedDenySlack: (userId) => `❌ *已拒绝* — <@${userId}>`,
+    resolvedDenyLocal: () => '❌ *已拒绝* — 本机已确认',
+    resolvedOptionSlack: (optionLabel, userId) =>
+      `📌 *已选择：${optionLabel}* — <@${userId}>`,
+    resolvedOptionLocal: () => '📌 *已在本机确认*',
+    resolvedAlready: () => 'ℹ️ 该待办已处理',
+    cardRequestedAt: (time) => `🕐 *请求时间* ${time}`,
+    cardResolvedAt: (requested, resolved) =>
+      `🕐 *请求* ${requested}  ·  *处理* ${resolved}`,
   },
   about: {
     windowTitle: '关于',
@@ -181,6 +285,12 @@ const ja: Messages = {
     hint: 'App を追加するとメニューバーにステータスドット（灰/緑/黄/赤）が表示されます。未追加時は灰色のハブドットのみです。',
     notifications: '赤ランプ時にシステム通知',
     launchAtLogin: 'ログイン時に起動',
+    launchAtLoginFailed:
+      'ログイン時の起動を有効にできませんでした。Windows はタスクマネージャー → スタートアップ、macOS は署名・公証またはログイン項目での許可を確認してください。',
+    launchAtLoginApproval:
+      'システム設定 → 一般 → ログイン項目 で ComBrief を許可してから、再度オンにしてください。',
+    launchAtLoginDisabled:
+      'タスクマネージャー → スタートアップ で ComBrief が無効です。有効にしてから再度オンにしてください。',
     showTrayAbbrev: 'ドット内に略称を表示',
     eventLogging: 'デバッグログを書き込む（~/.combrief/logs）',
     language: '言語',
@@ -192,6 +302,37 @@ const ja: Messages = {
     add: '追加',
     remove: '削除',
     connectError: 'ComBrief に接続できません。アプリを再起動してください。',
+    slackSection: 'Slack リモート承認（Claude Code）',
+    slackEnabled: 'Slack リモート承認を有効化',
+    slackBotToken: 'Bot User OAuth Token (xoxb-…)',
+    slackAppToken: 'Socket Mode App Token (xapp-…)',
+    slackChannelId: 'チャンネル ID（非公開は C… または G…）',
+    slackTest: 'テストメッセージを送信',
+    slackStatusConnected: 'Slack: 接続済み',
+    slackStatusDisconnected: 'Slack: 未接続',
+    slackCardTitle: 'Claude Code の承認が必要です',
+    slackSetupGuide: 'Slack 設定ガイドを開く…',
+    slackSetupGuideTitle: 'Slack リモート承認 — 設定ガイド',
+  },
+  slackCard: {
+    allowOnce: '許可（今回のみ）',
+    deny: '拒否',
+    allowAlways: (detail) => `常に許可: ${detail}`,
+    resolvedAllowSlack: (userId) => `✅ *許可（今回のみ）* — <@${userId}>`,
+    resolvedAllowLocal: () => '✅ *許可（今回のみ）* — この Mac で確認',
+    resolvedAllowAlwaysSlack: (detail, userId) =>
+      `✅ *常に許可: ${detail}* — <@${userId}>`,
+    resolvedAllowAlwaysLocal: (detail) =>
+      `✅ *常に許可: ${detail}* — ターミナルで確認`,
+    resolvedDenySlack: (userId) => `❌ *拒否* — <@${userId}>`,
+    resolvedDenyLocal: () => '❌ *拒否* — この Mac で確認',
+    resolvedOptionSlack: (optionLabel, userId) =>
+      `📌 *選択: ${optionLabel}* — <@${userId}>`,
+    resolvedOptionLocal: () => '📌 *この Mac で確認済み*',
+    resolvedAlready: () => 'ℹ️ このリクエストは処理済みです',
+    cardRequestedAt: (time) => `🕐 *リクエスト* ${time}`,
+    cardResolvedAt: (requested, resolved) =>
+      `🕐 *リクエスト* ${requested}  ·  *処理* ${resolved}`,
   },
   about: {
     windowTitle: 'ComBrief について',
@@ -218,6 +359,46 @@ export function resolveLocale(raw?: string): Locale {
 
 export function getMessages(locale: Locale): Messages {
   return MESSAGES[locale];
+}
+
+export type SlackCardLabels = {
+  slackCardTitle: string;
+  slackAllowOnce: string;
+  slackDeny: string;
+  slackAllowAlways: (detail: string) => string;
+  slackResolvedAllowSlack: (userId: string) => string;
+  slackResolvedAllowLocal: () => string;
+  slackResolvedAllowAlwaysSlack: (detail: string, userId: string) => string;
+  slackResolvedAllowAlwaysLocal: (detail: string) => string;
+  slackResolvedDenySlack: (userId: string) => string;
+  slackResolvedDenyLocal: () => string;
+  slackResolvedOptionSlack: (optionLabel: string, userId: string) => string;
+  slackResolvedOptionLocal: () => string;
+  slackResolvedAlready: () => string;
+  slackCardRequestedAt: (time: string) => string;
+  slackCardResolvedAt: (requested: string, resolved: string) => string;
+};
+
+export function getSlackCardLabels(locale: Locale): SlackCardLabels {
+  const m = getMessages(locale);
+  const c = m.slackCard;
+  return {
+    slackCardTitle: m.settings.slackCardTitle,
+    slackAllowOnce: c.allowOnce,
+    slackDeny: c.deny,
+    slackAllowAlways: c.allowAlways,
+    slackResolvedAllowSlack: c.resolvedAllowSlack,
+    slackResolvedAllowLocal: c.resolvedAllowLocal,
+    slackResolvedAllowAlwaysSlack: c.resolvedAllowAlwaysSlack,
+    slackResolvedAllowAlwaysLocal: c.resolvedAllowAlwaysLocal,
+    slackResolvedDenySlack: c.resolvedDenySlack,
+    slackResolvedDenyLocal: c.resolvedDenyLocal,
+    slackResolvedOptionSlack: c.resolvedOptionSlack,
+    slackResolvedOptionLocal: c.resolvedOptionLocal,
+    slackResolvedAlready: c.resolvedAlready,
+    slackCardRequestedAt: c.cardRequestedAt,
+    slackCardResolvedAt: c.cardResolvedAt,
+  };
 }
 
 /** IPC-safe subset (no functions) for settings / about renderer */

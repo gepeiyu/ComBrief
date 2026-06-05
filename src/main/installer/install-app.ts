@@ -3,6 +3,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
   chmodSync,
@@ -30,7 +31,14 @@ import {
   removeClaudeBridge,
   type ClaudeSettingsFile,
 } from './settings-json';
-import { appBackupDir, appInstallDir, bridgeScriptPath, expandHomePath } from './paths';
+import {
+  appBackupDir,
+  appInstallDir,
+  bridgeScriptPath,
+  remoteGateScriptPath,
+  expandHomePath,
+} from './paths';
+import { injectRemoteGate, removeRemoteGate } from './remote-gate-json';
 import { resolveNodeExecutable, writeWindowsBridgeCmd } from './node-resolve';
 
 function extensionsSourceDir(appId: string): string {
@@ -72,7 +80,23 @@ function copyBridgeFiles(appId: string, destDir: string): string | undefined {
   const src = extensionsSourceDir(appId);
   mkdirSync(destDir, { recursive: true });
   const bridgePath = join(destDir, 'bridge.mjs');
-  cpSync(join(src, 'bridge.mjs'), bridgePath);
+  for (const name of readdirSync(src)) {
+    if (!name.endsWith('.mjs')) continue;
+    const dest = join(destDir, name);
+    cpSync(join(src, name), dest);
+    if (process.platform !== 'win32') {
+      chmodSync(dest, 0o755);
+    }
+  }
+  const gatePath = join(destDir, 'remote-gate.mjs');
+  if (process.platform === 'win32' && existsSync(gatePath)) {
+    const nodePath = resolveNodeExecutable();
+    writeWindowsBridgeCmd(
+      join(destDir, 'remote-gate.cmd'),
+      nodePath,
+      gatePath,
+    );
+  }
   if (process.platform === 'win32') {
     const nodePath = resolveNodeExecutable();
     writeWindowsBridgeCmd(join(destDir, 'bridge.cmd'), nodePath, bridgePath);
@@ -112,8 +136,10 @@ export function installApp(appId: string): InstallResult {
       configPath,
       emptyClaudeSettings(),
     );
-    chainCommands = collectClaudeChainCommands(current, bridgePath);
-    const next = injectClaudeBridge(current, bridgePath, appId);
+    const gatePath = remoteGateScriptPath(appId);
+    chainCommands = collectClaudeChainCommands(current, bridgePath, gatePath);
+    let next = injectClaudeBridge(current, bridgePath, appId);
+    next = injectRemoteGate(next, gatePath);
     writeJsonFile(configPath, next);
   }
 
@@ -157,7 +183,10 @@ export function uninstallApp(appId: string): void {
     if (app.kind === 'cursor-hooks-json') {
       writeJsonFile(configPath, removeCursorFromFile(configPath, bridgeScriptPath(appId)));
     } else {
-      writeJsonFile(configPath, removeClaudeFromFile(configPath, bridgeScriptPath(appId)));
+      writeJsonFile(
+        configPath,
+        removeClaudeFromFile(configPath, bridgeScriptPath(appId), appId),
+      );
     }
   }
 
@@ -180,7 +209,9 @@ function removeCursorFromFile(
 function removeClaudeFromFile(
   configPath: string,
   bridgePath: string,
+  appId: string,
 ): ClaudeSettingsFile {
   const current = readJsonFile(configPath, emptyClaudeSettings());
-  return removeClaudeBridge(current, bridgePath);
+  const gatePath = remoteGateScriptPath(appId);
+  return removeRemoteGate(removeClaudeBridge(current, bridgePath), gatePath);
 }

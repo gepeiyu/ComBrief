@@ -14,27 +14,30 @@ Menu bar / system tray status lights for **Cursor**, **Claude Code**, and other 
 - [Node.js](https://nodejs.org) 20+ (hooks invoke `node` on your PATH to report state)
 - [Cursor](https://cursor.com) and/or [Claude Code](https://code.claude.com)
 
-### Download
+### Local install
 
-| Platform | Download |
-|----------|----------|
-| macOS (Intel) | [ComBrief-0.1.0.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0.dmg) |
-| macOS (Apple Silicon) | [ComBrief-0.1.0-arm64.dmg](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief-0.1.0-arm64.dmg) |
-| Windows | [ComBrief Setup 0.1.0.exe](https://github.com/gepeiyu/ComBrief/releases/download/v0.1.0/ComBrief.Setup.0.1.0.exe) |
+```bash
+git clone https://github.com/gepeiyu/ComBrief.git
+cd ComBrief
+npm install
+npm test          # optional
+```
 
-Other versions: [GitHub Releases](https://github.com/gepeiyu/ComBrief/releases).
+**Day-to-day use** (no packaging):
 
-After installation, launch ComBrief from the menu bar / system tray.
+```bash
+npm start
+```
 
-#### macOS: “was not opened” warning?
+Launch ComBrief from the menu bar / system tray.
 
-Release builds are not Apple-notarized yet. macOS may block the first launch after downloading from GitHub—this is expected.
+**Build installers** (optional):
 
-1. Click **Done** on the dialog (do not click **Move to Trash**).
-2. Open **System Settings → Privacy & Security**, scroll down, and if you see **“Open ‘ComBrief.app’ anyway”**, click it and confirm.
-3. Open ComBrief from **Applications** again. If it is still blocked, **Control-click ComBrief → Open** (or right-click → Open).
+```bash
+npm run dist
+```
 
-On Intel Macs, use **ComBrief-0.1.0.dmg**; on Apple Silicon, use **ComBrief-0.1.0-arm64.dmg**.
+Output is in `release/` (`.dmg` on macOS, `.exe` on Windows). Local builds are not Apple-notarized; if macOS blocks the first launch, use **System Settings → Privacy & Security → Open anyway**, or **Control / right-click → Open**.
 
 ### Setup
 
@@ -105,18 +108,9 @@ Cursor / Claude Code
   ComBrief (Electron) ──► tray lights + notifications
 ```
 
-## Development
+## More docs
 
-```bash
-git clone https://github.com/gepeiyu/ComBrief.git
-cd ComBrief
-npm install
-npm test
-npm start          # run locally
-npm run dist       # build installers
-```
-
-More docs: [status light rules](docs/STATE-RULES.md)
+- [Status light rules](docs/STATE-RULES.md)
 
 ## Contributing
 

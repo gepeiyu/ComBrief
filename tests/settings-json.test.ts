@@ -50,6 +50,31 @@ describe('settings-json', () => {
     expect(collectClaudeChainCommands(SAMPLE, '/tmp/bridge.cmd')).toEqual(['echo hi']);
   });
 
+  it('excludes combrief remote-gate from chain', () => {
+    const withGate = {
+      hooks: {
+        PermissionRequest: [
+          {
+            hooks: [
+              { type: 'command' as const, command: 'echo hi' },
+              {
+                type: 'command' as const,
+                command: formatClaudeHookCommand('/tmp/remote-gate.mjs', 'PermissionRequest'),
+              },
+            ],
+          },
+        ],
+      },
+    };
+    expect(
+      collectClaudeChainCommands(
+        withGate,
+        '/tmp/bridge.cmd',
+        '/tmp/remote-gate.mjs',
+      ),
+    ).toEqual(['echo hi']);
+  });
+
   it('quotes Windows hook commands for bash', () => {
     withPlatform('win32', () => {
       expect(

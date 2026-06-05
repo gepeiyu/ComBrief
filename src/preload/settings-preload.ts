@@ -7,4 +7,7 @@ contextBridge.exposeInMainWorld('combrief', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch: object) => ipcRenderer.invoke('config:set', patch),
   getMessages: () => ipcRenderer.invoke('i18n:messages'),
+  slackStatus: () => ipcRenderer.invoke('slack:status'),
+  testSlack: () => ipcRenderer.invoke('slack:test'),
+  openSlackSetupGuide: () => ipcRenderer.invoke('slack:openSetupGuide'),
 });

@@ -161,6 +161,9 @@ export class AppController {
       trayAbbrevs: patch.trayAbbrevs
         ? { ...this.cfg.trayAbbrevs, ...patch.trayAbbrevs }
         : this.cfg.trayAbbrevs,
+      slack: patch.slack
+        ? { ...this.cfg.slack, ...patch.slack }
+        : this.cfg.slack,
       locale: patch.locale
         ? resolveLocale(patch.locale)
         : this.cfg.locale,

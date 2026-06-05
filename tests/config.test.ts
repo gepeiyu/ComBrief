@@ -41,6 +41,18 @@ describe('config', () => {
     );
   });
 
+  it('defaultConfig includes disabled slack', () => {
+    expect(defaultConfig().slack).toEqual({
+      enabled: false,
+      botToken: '',
+      appToken: '',
+      channelId: '',
+      decisionTimeoutMs: 600_000,
+      failClosed: false,
+      allowedUserIds: [],
+    });
+  });
+
   it('resolves tray abbrev from config override', () => {
     const cfg = {
       ...defaultConfig(),
