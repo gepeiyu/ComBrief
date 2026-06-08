@@ -14,15 +14,99 @@ export interface BuildHookStdoutInput {
   action: DecisionAction;
 }
 
+function askUserAnswers(
+  toolInput: Record<string, unknown>,
+  optionLabel: string,
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  const questions = toolInput.questions;
+  if (Array.isArray(questions)) {
+    for (const q of questions) {
+      if (q && typeof q === 'object' && 'question' in q) {
+        answers[String((q as { question: unknown }).question)] = optionLabel;
+      }
+    }
+  }
+  return answers;
+}
+
+function isAllowAction(action: DecisionAction): boolean {
+  return (
+    action.kind === 'allow' ||
+    action.kind === 'allowOnce' ||
+    action.kind === 'allowAlways'
+  );
+}
+
 export function buildHookStdout(input: BuildHookStdoutInput): string {
   const { hookEvent, toolName, toolInput, action } = input;
 
+  if (toolName === 'AskUserQuestion' && action.kind === 'option') {
+    const updatedInput = {
+      ...toolInput,
+      questions: toolInput.questions,
+      answers: askUserAnswers(toolInput, action.optionLabel),
+    };
+    if (hookEvent === 'permissionRequest') {
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PermissionRequest',
+          decision: { behavior: 'allow', updatedInput },
+        },
+      });
+    }
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput,
+      },
+    });
+  }
+
+  if (toolName === 'ExitPlanMode') {
+    if (hookEvent === 'permissionRequest') {
+      if (isAllowAction(action)) {
+        return JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PermissionRequest',
+            decision: { behavior: 'allow', updatedInput: toolInput },
+          },
+        });
+      }
+      const decision: Record<string, unknown> = { behavior: 'deny' };
+      if (action.kind === 'deny' && action.reason) {
+        decision.message = action.reason;
+      }
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PermissionRequest',
+          decision,
+        },
+      });
+    }
+    if (isAllowAction(action)) {
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+        },
+      });
+    }
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          action.kind === 'deny'
+            ? action.reason ?? 'Denied via Slack'
+            : 'Denied via Slack',
+      },
+    });
+  }
+
   if (hookEvent === 'permissionRequest') {
-    if (
-      action.kind === 'allow' ||
-      action.kind === 'allowOnce' ||
-      action.kind === 'allowAlways'
-    ) {
+    if (isAllowAction(action)) {
       const decision: Record<string, unknown> = {
         behavior: 'allow',
         updatedInput: toolInput,
@@ -50,49 +134,6 @@ export function buildHookStdout(input: BuildHookStdoutInput): string {
         },
       });
     }
-  }
-
-  if (toolName === 'AskUserQuestion' && action.kind === 'option') {
-    const questions = toolInput.questions;
-    const answers: Record<string, string> = {};
-    if (Array.isArray(questions)) {
-      for (const q of questions) {
-        if (q && typeof q === 'object' && 'question' in q) {
-          const key = String((q as { question: unknown }).question);
-          answers[key] = action.optionLabel;
-        }
-      }
-    }
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'allow',
-        updatedInput: {
-          ...toolInput,
-          questions: toolInput.questions,
-          answers,
-        },
-      },
-    });
-  }
-
-  if (toolName === 'ExitPlanMode') {
-    if (action.kind === 'allow') {
-      return JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'allow',
-        },
-      });
-    }
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason:
-          action.kind === 'deny' ? action.reason ?? 'Denied via Slack' : 'Denied via Slack',
-      },
-    });
   }
 
   const behavior = action.kind === 'allow' ? 'allow' : 'deny';

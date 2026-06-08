@@ -37,7 +37,25 @@ describe('buildHookStdout', () => {
     ]);
   });
 
-  it('PreToolUse AskUserQuestion with answers', () => {
+  it('PermissionRequest AskUserQuestion with answers', () => {
+    const toolInput = {
+      questions: [{ question: 'Pick?', options: [{ label: 'A' }] }],
+    };
+    const out = buildHookStdout({
+      hookEvent: 'permissionRequest',
+      toolName: 'AskUserQuestion',
+      toolInput,
+      action: { kind: 'option', optionLabel: 'A' },
+    });
+    const j = JSON.parse(out);
+    expect(j.hookSpecificOutput.hookEventName).toBe('PermissionRequest');
+    expect(j.hookSpecificOutput.decision.behavior).toBe('allow');
+    expect(j.hookSpecificOutput.decision.updatedInput.answers['Pick?']).toBe(
+      'A',
+    );
+  });
+
+  it('PreToolUse AskUserQuestion with answers (legacy format)', () => {
     const toolInput = {
       questions: [{ question: 'Pick?', options: [{ label: 'A' }] }],
     };
@@ -52,7 +70,33 @@ describe('buildHookStdout', () => {
     expect(j.hookSpecificOutput.updatedInput.answers['Pick?']).toBe('A');
   });
 
-  it('ExitPlanMode deny', () => {
+  it('PermissionRequest ExitPlanMode allow', () => {
+    const toolInput = { plan: '# Plan' };
+    const out = buildHookStdout({
+      hookEvent: 'permissionRequest',
+      toolName: 'ExitPlanMode',
+      toolInput,
+      action: { kind: 'allowOnce' },
+    });
+    const j = JSON.parse(out);
+    expect(j.hookSpecificOutput.hookEventName).toBe('PermissionRequest');
+    expect(j.hookSpecificOutput.decision.behavior).toBe('allow');
+  });
+
+  it('PermissionRequest ExitPlanMode deny', () => {
+    const out = buildHookStdout({
+      hookEvent: 'permissionRequest',
+      toolName: 'ExitPlanMode',
+      toolInput: { plan: '# Plan' },
+      action: { kind: 'deny', reason: 'Not now' },
+    });
+    const j = JSON.parse(out);
+    expect(j.hookSpecificOutput.hookEventName).toBe('PermissionRequest');
+    expect(j.hookSpecificOutput.decision.behavior).toBe('deny');
+    expect(j.hookSpecificOutput.decision.message).toBe('Not now');
+  });
+
+  it('PreToolUse ExitPlanMode deny (legacy format)', () => {
     const out = buildHookStdout({
       hookEvent: 'preToolUse',
       toolName: 'ExitPlanMode',

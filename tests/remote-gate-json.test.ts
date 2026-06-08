@@ -7,15 +7,12 @@ import {
 import { formatClaudeHookCommand } from '../src/main/installer/settings-json';
 
 describe('remote-gate-json', () => {
-  it('injects PermissionRequest and PreToolUse matchers', () => {
+  it('injects PermissionRequest only (dual-channel, no PreToolUse gate)', () => {
     const gate = '/tmp/remote-gate.mjs';
     const result = injectRemoteGate({}, gate);
     expect(result.hooks?.PermissionRequest).toBeDefined();
-    const pre = result.hooks?.PreToolUse ?? [];
-    const matchers = pre.map((g) => g.matcher).filter(Boolean);
-    expect(matchers).toContain('AskUserQuestion');
-    expect(matchers).toContain('ExitPlanMode');
-    expect(REMOTE_GATE_HOOKS.length).toBe(3);
+    expect(result.hooks?.PreToolUse).toBeUndefined();
+    expect(REMOTE_GATE_HOOKS).toEqual([{ event: 'PermissionRequest' }]);
   });
 
   it('removes only remote-gate commands', () => {
