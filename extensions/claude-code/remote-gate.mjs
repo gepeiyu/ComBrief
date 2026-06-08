@@ -42,13 +42,8 @@ function resolveHookEvent(input) {
   );
 }
 
-function isGateEvent(hookName, input) {
-  if (hookName === 'PermissionRequest') return true;
-  if (hookName === 'PreToolUse') {
-    const tool = input.tool_name ?? input.toolName;
-    return tool === 'AskUserQuestion' || tool === 'ExitPlanMode';
-  }
-  return false;
+function isGateEvent(hookName) {
+  return hookName === 'PermissionRequest';
 }
 
 function postJson(config, path, body, timeoutMs) {
@@ -123,7 +118,7 @@ if (argvEvent && inputEvent && argvEvent !== inputEvent) {
 
 const hookName = resolveHookEvent(input);
 
-if (!hookName || !isGateEvent(hookName, input)) {
+if (!hookName || !isGateEvent(hookName)) {
   process.exit(0);
 }
 
@@ -136,14 +131,11 @@ if (!config.slack?.enabled) {
   process.exit(0);
 }
 
-const hookEvent =
-  hookName === 'PermissionRequest' ? 'permissionRequest' : 'preToolUse';
-
 await reportState(config, 'permissionRequest', input);
 
 const waitBody = JSON.stringify({
   appId: APP_ID,
-  hookEvent,
+  hookEvent: 'permissionRequest',
   sessionId: input.session_id,
   cwd: input.cwd,
   toolName: input.tool_name ?? input.toolName ?? 'unknown',

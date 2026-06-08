@@ -58,7 +58,8 @@ export interface StatePayload {
 }
 
 /**
- * 双通道：Slack 卡片与本地 CLI 确认并行；先处理者获胜。
+ * 双通道：Slack 卡片与 CC 原生确认 / 本地 CLI 并行；先处理者获胜。
+ * AskUserQuestion / ExitPlanMode 仅走 PermissionRequest（不在 PreToolUse 阻塞）。
  * 本地已确认时返回 hookStdout: null，让 Hook 退出且不覆盖本地决策。
  */
 export class DecisionService {

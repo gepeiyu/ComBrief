@@ -1,10 +1,9 @@
 import type { ClaudeHookCommand, ClaudeSettingsFile } from './settings-json';
 import { formatClaudeHookCommand } from './settings-json';
 
+/** PermissionRequest 双通道：CC 原生 UI 与 Slack 并行，先处理者获胜。 */
 export const REMOTE_GATE_HOOKS: Array<{ event: string; matcher?: string }> = [
   { event: 'PermissionRequest' },
-  { event: 'PreToolUse', matcher: 'AskUserQuestion' },
-  { event: 'PreToolUse', matcher: 'ExitPlanMode' },
 ];
 
 function normalizeHookCommand(command: string): string {
