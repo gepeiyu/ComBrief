@@ -43,6 +43,11 @@ export type Messages = {
     slackTest: string;
     slackStatusConnected: string;
     slackStatusDisconnected: string;
+    hardwareSection: string;
+    hardwareEnabled: string;
+    hardwareTestDisplay: string;
+    hardwareStatusConnected: string;
+    hardwareStatusDisconnected: string;
     slackCardTitle: string;
     slackSetupGuide: string;
     slackSetupGuideTitle: string;
@@ -128,6 +133,11 @@ const en: Messages = {
     slackTest: 'Send test message',
     slackStatusConnected: 'Slack: connected',
     slackStatusDisconnected: 'Slack: disconnected',
+    hardwareSection: 'ComBrief Remote',
+    hardwareEnabled: 'Enable ComBrief Remote',
+    hardwareTestDisplay: 'Test display',
+    hardwareStatusConnected: 'Remote: connected',
+    hardwareStatusDisconnected: 'Remote: disconnected',
     slackCardTitle: 'Claude Code needs your approval',
     slackSetupGuide: 'Open Slack setup guide…',
     slackSetupGuideTitle: 'Slack remote approval — setup guide',
@@ -219,6 +229,11 @@ const zh: Messages = {
     slackTest: '发送测试消息',
     slackStatusConnected: 'Slack：已连接',
     slackStatusDisconnected: 'Slack：未连接',
+    hardwareSection: 'ComBrief Remote',
+    hardwareEnabled: '启用 ComBrief Remote',
+    hardwareTestDisplay: '测试显示',
+    hardwareStatusConnected: 'Remote：已连接',
+    hardwareStatusDisconnected: 'Remote：未连接',
     slackCardTitle: 'Claude Code 需要你确认',
     slackSetupGuide: '打开 Slack 配置指南…',
     slackSetupGuideTitle: 'Slack 远程确认 — 配置指南',
@@ -310,6 +325,11 @@ const ja: Messages = {
     slackTest: 'テストメッセージを送信',
     slackStatusConnected: 'Slack: 接続済み',
     slackStatusDisconnected: 'Slack: 未接続',
+    hardwareSection: 'ComBrief Remote',
+    hardwareEnabled: 'ComBrief Remote を有効化',
+    hardwareTestDisplay: '表示をテスト',
+    hardwareStatusConnected: 'Remote: 接続済み',
+    hardwareStatusDisconnected: 'Remote: 未接続',
     slackCardTitle: 'Claude Code の承認が必要です',
     slackSetupGuide: 'Slack 設定ガイドを開く…',
     slackSetupGuideTitle: 'Slack リモート承認 — 設定ガイド',

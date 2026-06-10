@@ -1,5 +1,6 @@
 export interface DecisionResult {
   hookStdout: string | null;
+  source?: 'timeout' | 'local' | 'slack' | 'hardware';
 }
 
 export class DecisionQueue {

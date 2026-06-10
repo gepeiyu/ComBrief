@@ -25,6 +25,17 @@ import {
 } from './slack/hook-stdout';
 import { formatToolSummary } from './slack/tool-summary';
 import type { BlockActionPayload, SlackAdapter } from './slack/adapter';
+import { buildHardwareRequest } from './hardware/request-builder';
+import { mapHardwareDecisionToAction } from './hardware/decision-mapper';
+import {
+  HARDWARE_PROTOCOL_VERSION,
+  type HardwareDecisionMessage,
+  type HardwareResolvedMessage,
+  type HardwareResolvedResult,
+} from './hardware/protocol';
+import type { HardwareRuntime } from './hardware/runtime';
+
+type ResolutionVia = 'slack' | 'local' | 'hardware';
 
 interface SlackCardSnapshot {
   channelId: string;
@@ -35,16 +46,16 @@ interface SlackCardSnapshot {
 }
 
 type CardResolution =
-  | { kind: 'allow' | 'deny'; via: 'slack' | 'local'; userId?: string }
+  | { kind: 'allow' | 'deny'; via: ResolutionVia; userId?: string }
   | {
       kind: 'allowAlways';
-      via: 'slack' | 'local';
+      via: ResolutionVia;
       userId?: string;
       detail: string;
     }
   | {
       kind: 'option';
-      via: 'slack' | 'local';
+      via: ResolutionVia;
       optionLabel: string;
       userId?: string;
     }
@@ -66,19 +77,24 @@ export class DecisionService {
   private pendingMeta = new Map<string, PendingDecision>();
   private sessionIndex = new Map<string, string>();
   private cardSnapshots = new Map<string, SlackCardSnapshot>();
+  private hardwareResolvedRequestIds = new Set<string>();
+  private nonTimeoutResolvedRequestIds = new Set<string>();
 
   constructor(
     private getConfig: () => CombriefConfig,
     private slack: SlackAdapter | null,
     private queue: DecisionQueue,
     private getCardLabels: () => SlackCardLabels,
+    private hardware: HardwareRuntime | null = null,
   ) {}
 
   async handleWait(
     body: DecisionWaitBody,
   ): Promise<{ requestId: string; hookStdout: string | null }> {
     const cfg = this.getConfig();
-    if (!cfg.slack.enabled) {
+    const hardwareDecisionEnabled =
+      cfg.hardware.enabled && cfg.hardware.decisionPushEnabled && this.hardware !== null;
+    if (!cfg.slack.enabled && !hardwareDecisionEnabled) {
       return { requestId: '', hookStdout: null };
     }
 
@@ -92,19 +108,38 @@ export class DecisionService {
       this.sessionIndex.set(body.sessionId, requestId);
     }
 
-    if (this.slack) {
-      try {
-        await this.postCard(requestId, body);
-      } catch {
+    const waitPromise = this.queue.wait(requestId, cfg.slack.decisionTimeoutMs);
+
+    if (cfg.slack.enabled && this.slack) {
+      void this.postCard(requestId, body).catch(() => {
         /* 仍等待；本地 CLI 可照常确认 */
-      }
+      });
+    }
+
+    if (hardwareDecisionEnabled && this.hardware) {
+      void this.hardware
+        .sendRequest(
+          buildHardwareRequest(
+            requestId,
+            body,
+            process.env.npm_package_version ?? '0.0.0',
+            cfg.slack.decisionTimeoutMs,
+          ),
+        )
+        .catch(() => {
+          /* 决策通道仍可由 Slack / 本地 / 超时完成 */
+        });
     }
 
     try {
-      const result = await this.queue.wait(
-        requestId,
-        cfg.slack.decisionTimeoutMs,
-      );
+      const result = await waitPromise;
+
+      if (
+        result.hookStdout === null &&
+        !this.nonTimeoutResolvedRequestIds.has(requestId)
+      ) {
+        this.sendHardwareResolved(requestId, 'expired', 'Request expired');
+      }
 
       if (result.hookStdout === null && cfg.slack.failClosed) {
         const deny = buildHookStdout({
@@ -122,6 +157,31 @@ export class DecisionService {
     }
   }
 
+  resolveFromHardware(message: HardwareDecisionMessage): boolean {
+    const pending = this.pendingMeta.get(message.decisionId);
+    if (!pending || !this.queue.isWaiting(message.decisionId)) return false;
+
+    const action = mapHardwareDecisionToAction(message, pending);
+    if (!action) return false;
+
+    const hookStdout = buildHookStdout({
+      hookEvent: pending.body.hookEvent,
+      toolName: pending.body.toolName,
+      toolInput: pending.body.toolInput,
+      action,
+    });
+    if (!this.queue.resolve(message.decisionId, { hookStdout, source: 'hardware' })) return false;
+    this.nonTimeoutResolvedRequestIds.add(message.decisionId);
+
+    const resolved = this.hardwareResolvedFromAction(action);
+    this.sendHardwareResolved(message.decisionId, resolved.result, resolved.message);
+    void this.updateCardResolved(
+      message.decisionId,
+      this.resolutionFromAction(action, 'hardware', pending.body.toolName),
+    );
+    return true;
+  }
+
   /** remote-gate 终端菜单先处理：结束等待并更新 Slack 卡片 */
   resolveLocalTerminal(body: {
     sessionId?: string;
@@ -136,7 +196,8 @@ export class DecisionService {
     const pending = this.pendingMeta.get(requestId);
     if (!pending || pending.body.toolName !== body.toolName) return false;
 
-    if (!this.queue.resolve(requestId, { hookStdout: null })) return false;
+    if (!this.queue.resolve(requestId, { hookStdout: null, source: 'local' })) return false;
+    this.nonTimeoutResolvedRequestIds.add(requestId);
 
     if (body.kind === 'allowAlways' && body.detail) {
       void this.updateCardResolved(requestId, {
@@ -149,6 +210,11 @@ export class DecisionService {
     } else {
       void this.updateCardResolved(requestId, { kind: 'allow', via: 'local' });
     }
+    this.sendHardwareResolved(
+      requestId,
+      'handled_elsewhere',
+      'Handled by local terminal',
+    );
     return true;
   }
 
@@ -169,8 +235,10 @@ export class DecisionService {
       ) {
         return;
       }
-      this.queue.resolve(requestId, { hookStdout: null });
+      this.queue.resolve(requestId, { hookStdout: null, source: 'local' });
+      this.nonTimeoutResolvedRequestIds.add(requestId);
       void this.updateCardResolved(requestId, { kind: 'allow', via: 'local' });
+      this.sendHardwareResolved(requestId, 'handled_elsewhere', 'Handled elsewhere');
       return;
     }
 
@@ -178,8 +246,19 @@ export class DecisionService {
       payload.event === 'postToolUseFailure' &&
       payload.meta?.failureType === 'permission_denied'
     ) {
-      this.queue.resolve(requestId, { hookStdout: null });
+      this.queue.resolve(requestId, { hookStdout: null, source: 'local' });
+      this.nonTimeoutResolvedRequestIds.add(requestId);
       void this.updateCardResolved(requestId, { kind: 'deny', via: 'local' });
+      this.sendHardwareResolved(requestId, 'handled_elsewhere', 'Handled elsewhere');
+    }
+  }
+
+  shutdown(reason = 'Runtime stopped'): void {
+    for (const [requestId] of [...this.pendingMeta]) {
+      if (!this.queue.isWaiting(requestId)) continue;
+      this.nonTimeoutResolvedRequestIds.add(requestId);
+      this.sendHardwareResolved(requestId, 'handled_elsewhere', reason);
+      this.queue.resolve(requestId, { hookStdout: null, source: 'local' });
     }
   }
 
@@ -207,12 +286,19 @@ export class DecisionService {
       toolInput: meta.body.toolInput,
       action,
     });
-    if (!this.queue.resolve(parsed.requestId, { hookStdout })) return;
+    if (!this.queue.resolve(parsed.requestId, { hookStdout, source: 'slack' })) return;
+    this.nonTimeoutResolvedRequestIds.add(parsed.requestId);
 
     const resolution = this.resolutionFromAction(
       action,
       payload.userId,
       meta.body.toolName,
+    );
+    const hardwareResolution = this.hardwareResolvedFromAction(action);
+    this.sendHardwareResolved(
+      parsed.requestId,
+      hardwareResolution.result,
+      hardwareResolution.message,
     );
     await this.updateCardResolved(
       parsed.requestId,
@@ -224,9 +310,44 @@ export class DecisionService {
 
   private clearPending(requestId: string, sessionId?: string): void {
     this.pendingMeta.delete(requestId);
+    this.hardwareResolvedRequestIds.delete(requestId);
+    this.nonTimeoutResolvedRequestIds.delete(requestId);
     if (sessionId && this.sessionIndex.get(sessionId) === requestId) {
       this.sessionIndex.delete(sessionId);
     }
+  }
+
+  private sendHardwareResolved(
+    requestId: string,
+    result: HardwareResolvedResult,
+    message: string,
+  ): void {
+    if (!this.hardware || this.hardwareResolvedRequestIds.has(requestId)) return;
+
+    this.hardwareResolvedRequestIds.add(requestId);
+    const resolved: HardwareResolvedMessage = {
+      protocol: HARDWARE_PROTOCOL_VERSION,
+      type: 'resolved',
+      decisionId: requestId,
+      result,
+      message,
+    };
+    void this.hardware.sendResolved(resolved).catch(() => {
+      this.hardwareResolvedRequestIds.delete(requestId);
+    });
+  }
+
+  private hardwareResolvedFromAction(action: DecisionAction): {
+    result: HardwareResolvedResult;
+    message: string;
+  } {
+    if (action.kind === 'option') {
+      return { result: 'selected', message: 'Selected by Remote' };
+    }
+    if (action.kind === 'deny') {
+      return { result: 'denied', message: 'Denied by Remote' };
+    }
+    return { result: 'approved', message: 'Approved by Remote' };
   }
 
   private toDecisionAction(
@@ -357,6 +478,9 @@ export class DecisionService {
       return labels.slackResolvedAlready();
     }
     if (resolution.kind === 'option') {
+      if (resolution.via === 'hardware') {
+        return `Selected by ComBrief Remote: ${resolution.optionLabel}`;
+      }
       if (resolution.via === 'slack' && resolution.userId) {
         return labels.slackResolvedOptionSlack(
           resolution.optionLabel,
@@ -366,6 +490,9 @@ export class DecisionService {
       return labels.slackResolvedOptionLocal();
     }
     if (resolution.kind === 'allowAlways') {
+      if (resolution.via === 'hardware') {
+        return `Allowed by ComBrief Remote: ${resolution.detail}`;
+      }
       if (resolution.via === 'local') {
         return labels.slackResolvedAllowAlwaysLocal(resolution.detail);
       }
@@ -375,10 +502,16 @@ export class DecisionService {
       );
     }
     if (resolution.kind === 'allow') {
+      if (resolution.via === 'hardware') {
+        return 'Allowed by ComBrief Remote';
+      }
       if (resolution.via === 'slack' && resolution.userId) {
         return labels.slackResolvedAllowSlack(resolution.userId);
       }
       return labels.slackResolvedAllowLocal();
+    }
+    if (resolution.via === 'hardware') {
+      return 'Denied by ComBrief Remote';
     }
     if (resolution.via === 'slack' && resolution.userId) {
       return labels.slackResolvedDenySlack(resolution.userId);
@@ -391,12 +524,14 @@ export class DecisionService {
     userId: string,
     toolName: string,
   ): CardResolution {
+    const via: 'slack' | 'hardware' = userId === 'hardware' ? 'hardware' : 'slack';
+    const resolvedUserId = via === 'slack' ? userId : undefined;
     if (action.kind === 'option') {
       return {
         kind: 'option',
-        via: 'slack',
+        via,
         optionLabel: action.optionLabel,
-        userId,
+        userId: resolvedUserId,
       };
     }
     if (action.kind === 'allowAlways') {
@@ -405,12 +540,12 @@ export class DecisionService {
         toolName,
         (d) => d,
       );
-      return { kind: 'allowAlways', via: 'slack', userId, detail };
+      return { kind: 'allowAlways', via, userId: resolvedUserId, detail };
     }
     if (action.kind === 'allow' || action.kind === 'allowOnce') {
-      return { kind: 'allow', via: 'slack', userId };
+      return { kind: 'allow', via, userId: resolvedUserId };
     }
-    return { kind: 'deny', via: 'slack', userId };
+    return { kind: 'deny', via, userId: resolvedUserId };
   }
 
   private async updateCardResolved(

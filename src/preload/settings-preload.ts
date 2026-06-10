@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld('combrief', {
   slackStatus: () => ipcRenderer.invoke('slack:status'),
   testSlack: () => ipcRenderer.invoke('slack:test'),
   openSlackSetupGuide: () => ipcRenderer.invoke('slack:openSetupGuide'),
+  hardwareStatus: () => ipcRenderer.invoke('hardware:status'),
+  testHardwareDisplay: () => ipcRenderer.invoke('hardware:testDisplay'),
 });

@@ -22,6 +22,10 @@ import {
   type StateMeta,
 } from './state-machine';
 import type { TrayManager } from './tray-manager';
+import {
+  HARDWARE_PROTOCOL_VERSION,
+  type HardwareStateMessage,
+} from './hardware/protocol';
 
 export class AppController {
   private apps = new Map<string, AppState>();
@@ -164,6 +168,9 @@ export class AppController {
       slack: patch.slack
         ? { ...this.cfg.slack, ...patch.slack }
         : this.cfg.slack,
+      hardware: patch.hardware
+        ? { ...this.cfg.hardware, ...patch.hardware }
+        : this.cfg.hardware,
       locale: patch.locale
         ? resolveLocale(patch.locale)
         : this.cfg.locale,
@@ -175,6 +182,28 @@ export class AppController {
     if (patch.locale && resolveLocale(patch.locale) !== prevLocale) {
       this.trayManager.setMessages(this.uiMessages());
     }
+  }
+
+  getHardwareStateSnapshot(appVersion: string): HardwareStateMessage {
+    const apps = [...this.apps.entries()].map(([id, state]) => ({
+      id,
+      label: resolveTrayAbbrev(id, this.cfg) || getAppDefinition(id).trayAbbrev,
+      status: state.status,
+    }));
+    const primary =
+      apps.find((item) => item.status === 'waiting_user')?.id ??
+      apps.find((item) => item.status === 'working')?.id ??
+      apps[0]?.id;
+
+    return {
+      protocol: HARDWARE_PROTOCOL_VERSION,
+      type: 'state',
+      appName: 'ComBrief',
+      appVersion,
+      apps,
+      primary,
+      ts: Date.now(),
+    };
   }
 
   private trayCallbacks(appId: string) {

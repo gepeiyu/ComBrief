@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getAppDefinition } from './apps/registry';
+import { COMBRIEF_REMOTE_NAME } from './hardware/protocol';
 import { resolveLocale, type Locale } from './i18n';
 import { normalizeTrayAbbrev } from './tray-icons';
 
@@ -13,6 +14,26 @@ export interface SlackConfig {
   decisionTimeoutMs: number;
   failClosed: boolean;
   allowedUserIds: string[];
+}
+
+export interface HardwareConfig {
+  enabled: boolean;
+  deviceName: string;
+  autoReconnect: boolean;
+  lastDeviceId: string;
+  statusPushEnabled: boolean;
+  decisionPushEnabled: boolean;
+}
+
+export function defaultHardwareConfig(): HardwareConfig {
+  return {
+    enabled: false,
+    deviceName: COMBRIEF_REMOTE_NAME,
+    autoReconnect: true,
+    lastDeviceId: '',
+    statusPushEnabled: true,
+    decisionPushEnabled: true,
+  };
 }
 
 export function defaultSlackConfig(): SlackConfig {
@@ -46,6 +67,7 @@ export interface CombriefConfig {
   locale: Locale;
   apps: string[];
   slack: SlackConfig;
+  hardware: HardwareConfig;
 }
 
 export function resolveEventLoggingEnabled(cfg: CombriefConfig): boolean {
@@ -85,6 +107,7 @@ export function defaultConfig(): CombriefConfig {
     locale: 'en',
     apps: [],
     slack: defaultSlackConfig(),
+    hardware: defaultHardwareConfig(),
   };
 }
 
@@ -109,6 +132,10 @@ export function loadConfig(home = combriefHome()): CombriefConfig {
       ...base.slack,
       ...(raw.slack ?? {}),
       allowedUserIds: raw.slack?.allowedUserIds ?? base.slack.allowedUserIds,
+    },
+    hardware: {
+      ...base.hardware,
+      ...(raw.hardware ?? {}),
     },
   };
 }

@@ -3,6 +3,7 @@ import { DecisionQueue } from './decision-queue';
 import { DecisionService } from './decision-service';
 import type { SlackCardLabels } from './i18n/messages';
 import { SlackAdapter } from './slack/adapter';
+import type { HardwareRuntime } from './hardware/runtime';
 
 export class SlackRuntime {
   private adapter: SlackAdapter | null = null;
@@ -12,6 +13,7 @@ export class SlackRuntime {
   constructor(
     private getConfig: () => CombriefConfig,
     private getCardLabels: () => SlackCardLabels,
+    private getHardwareRuntime: () => HardwareRuntime | null = () => null,
   ) {}
 
   getDecisionService(): DecisionService | null {
@@ -27,32 +29,43 @@ export class SlackRuntime {
   async restart(): Promise<void> {
     await this.stop();
     const cfg = this.getConfig();
-    if (
-      !cfg.slack.enabled ||
-      !cfg.slack.botToken.trim() ||
-      !cfg.slack.appToken.trim()
-    ) {
+    const hardware = this.getHardwareRuntime();
+    const hardwareDecisionEnabled =
+      cfg.hardware.enabled && cfg.hardware.decisionPushEnabled && hardware !== null;
+    const slackEnabled =
+      cfg.slack.enabled &&
+      cfg.slack.botToken.trim() !== '' &&
+      cfg.slack.appToken.trim() !== '';
+
+    if (!slackEnabled && !hardwareDecisionEnabled) {
       return;
     }
-    const adapter = new SlackAdapter(cfg.slack, (payload) => {
-      return this.service?.handleBlockAction(payload);
-    });
+
+    const adapter = slackEnabled
+      ? new SlackAdapter(cfg.slack, (payload) => {
+          return this.service?.handleBlockAction(payload);
+        })
+      : null;
     const service = new DecisionService(
       this.getConfig,
       adapter,
       this.queue,
       this.getCardLabels,
+      hardware,
     );
     this.adapter = adapter;
     this.service = service;
-    try {
-      await adapter.start();
-    } catch {
-      /* status on adapter */
+    if (adapter) {
+      try {
+        await adapter.start();
+      } catch {
+        /* status on adapter */
+      }
     }
   }
 
   async stop(): Promise<void> {
+    this.service?.shutdown('Runtime stopped');
     await this.adapter?.stop();
     this.adapter = null;
     this.service = null;

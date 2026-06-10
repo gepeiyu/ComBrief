@@ -30,10 +30,13 @@ import { showSlackSetupGuide } from './slack-setup-window';
 import { SlackRuntime } from './slack-runtime';
 import { TrayManager } from './tray-manager';
 import { APP_REGISTRY } from './apps/registry';
+import { HardwareRuntime } from './hardware/runtime';
+import { MockHardwareTransport } from './hardware/mock-transport';
 
 let controller: AppController;
 let trayManager: TrayManager;
 let slackRuntime: SlackRuntime;
+let hardwareRuntime: HardwareRuntime;
 let mainWindow: BrowserWindow | null = null;
 const registeredApps = new Set<string>();
 
@@ -43,6 +46,39 @@ function slackCardLabels() {
 
 async function restartSlack(): Promise<void> {
   await slackRuntime.restart();
+}
+
+function logHardwareStatePushError(error: unknown): void {
+  console.warn('ComBrief Remote state push failed', error);
+}
+
+async function sendHardwareStateSnapshot(): Promise<void> {
+  await hardwareRuntime.sendState(controller.getHardwareStateSnapshot(app.getVersion()));
+}
+
+async function sendHardwareStateSnapshotSafely(): Promise<void> {
+  try {
+    await sendHardwareStateSnapshot();
+  } catch (error) {
+    logHardwareStatePushError(error);
+  }
+}
+
+async function restartHardware(): Promise<void> {
+  if (controller.getConfig().hardware.enabled) {
+    await hardwareRuntime.restart();
+    if (controller.getConfig().hardware.statusPushEnabled) {
+      await sendHardwareStateSnapshotSafely();
+    }
+  } else {
+    await hardwareRuntime.stop();
+  }
+}
+
+function pushHardwareStateIfEnabled(): void {
+  const cfg = controller.getConfig();
+  if (!cfg.hardware.enabled || !cfg.hardware.statusPushEnabled) return;
+  void sendHardwareStateSnapshot().catch(logHardwareStatePushError);
 }
 
 /** 把日志开关写入 config，供 bridge 子进程读取 */
@@ -141,7 +177,10 @@ function registerIpc(): void {
     if (partial.locale) {
       applySettingsWindowChrome();
     }
-    if (partial.slack !== undefined || partial.locale !== undefined) {
+    if (partial.hardware !== undefined) {
+      await restartHardware();
+    }
+    if (partial.slack !== undefined || partial.locale !== undefined || partial.hardware !== undefined) {
       await restartSlack();
     }
     saveConfig(combriefHome(), cfg);
@@ -149,6 +188,19 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('slack:status', () => slackRuntime.getStatus());
+
+  ipcMain.handle('hardware:status', () => hardwareRuntime.getStatus());
+
+  ipcMain.handle('hardware:testDisplay', async () => {
+    await hardwareRuntime.sendResolved({
+      protocol: 1,
+      type: 'resolved',
+      decisionId: 'test',
+      result: 'selected',
+      message: 'Hello Remote',
+    });
+    return { ok: true };
+  });
 
   ipcMain.handle('slack:test', async () => {
     await slackRuntime.sendTest();
@@ -196,10 +248,23 @@ app.whenReady().then(async () => {
   controller = new AppController(cfg, trayManager);
   controller.bootstrapRegisteredApps();
 
+  hardwareRuntime = new HardwareRuntime(new MockHardwareTransport(), {
+    onDecision: (message) => {
+      slackRuntime.getDecisionService()?.resolveFromHardware(message);
+    },
+  });
+
   slackRuntime = new SlackRuntime(
     () => controller.getConfig(),
     slackCardLabels,
+    () => hardwareRuntime,
   );
+  if (cfg.hardware.enabled) {
+    await hardwareRuntime.start();
+    if (cfg.hardware.statusPushEnabled) {
+      await sendHardwareStateSnapshotSafely();
+    }
+  }
   await slackRuntime.restart();
 
   const server = createCombriefServer({
@@ -208,6 +273,7 @@ app.whenReady().then(async () => {
     onState: (payload) => {
       controller.handleState(payload);
       slackRuntime.getDecisionService()?.tryResolveFromLocal(payload);
+      pushHardwareStateIfEnabled();
     },
     getDecisionService: () => slackRuntime.getDecisionService(),
     getSlackStatus: () => slackRuntime.getStatus(),

@@ -22,6 +22,24 @@ describe('i18n', () => {
     expect(getMessages('ja').settings.add).toBe('追加');
   });
 
+  it('provides hardware settings strings for each locale', () => {
+    const keys = [
+      'hardwareSection',
+      'hardwareEnabled',
+      'hardwareTestDisplay',
+      'hardwareStatusConnected',
+      'hardwareStatusDisconnected',
+    ] as const;
+
+    for (const locale of ['en', 'zh', 'ja'] as const) {
+      const settings = getMessages(locale).settings;
+      for (const key of keys) {
+        expect(settings[key]).toEqual(expect.any(String));
+        expect(settings[key].length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('renderer messages are IPC-cloneable (no functions)', () => {
     const m = getRendererMessages('en');
     expect(() => structuredClone(m)).not.toThrow();

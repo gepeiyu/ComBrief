@@ -15,6 +15,9 @@ const slackChannelIdEl = document.getElementById('slackChannelId');
 const slackTestEl = document.getElementById('slackTest');
 const slackSetupGuideEl = document.getElementById('slackSetupGuide');
 const slackStatusEl = document.getElementById('slackStatus');
+const hardwareEnabledEl = document.getElementById('hardwareEnabled');
+const hardwareTestDisplayEl = document.getElementById('hardwareTestDisplay');
+const hardwareStatusEl = document.getElementById('hardwareStatus');
 
 let strings = null;
 
@@ -67,6 +70,13 @@ function applyStaticStrings(m) {
   if (slackSetupGuideEl) {
     slackSetupGuideEl.textContent = m.settings.slackSetupGuide;
   }
+  const textHardwareSection = document.getElementById('text-hardwareSection');
+  const textHardwareEnabled = document.getElementById('text-hardwareEnabled');
+  if (textHardwareSection) textHardwareSection.textContent = m.settings.hardwareSection;
+  if (textHardwareEnabled) textHardwareEnabled.textContent = m.settings.hardwareEnabled;
+  if (hardwareTestDisplayEl) {
+    hardwareTestDisplayEl.textContent = m.settings.hardwareTestDisplay;
+  }
   document.title = m.settings.windowTitle;
 }
 
@@ -82,6 +92,25 @@ async function refreshSlackStatus(m) {
     }
   } catch {
     slackStatusEl.textContent = m.settings.slackStatusDisconnected;
+  }
+}
+
+async function refreshHardwareStatus(m) {
+  if (!hardwareStatusEl || !window.combrief?.hardwareStatus) return;
+  try {
+    const st = await window.combrief.hardwareStatus();
+    const details = [];
+    if (st.fwVersion) details.push(`FW ${st.fwVersion}`);
+    if (typeof st.battery === 'number') details.push(`${st.battery}%`);
+    if (st.lastError) details.push(st.lastError);
+    const base = st.connected
+      ? m.settings.hardwareStatusConnected
+      : m.settings.hardwareStatusDisconnected;
+    hardwareStatusEl.textContent = details.length
+      ? `${base} — ${details.join(' · ')}`
+      : base;
+  } catch {
+    hardwareStatusEl.textContent = m.settings.hardwareStatusDisconnected;
   }
 }
 
@@ -110,7 +139,9 @@ async function refresh() {
     if (slackBotTokenEl) slackBotTokenEl.value = cfg.slack?.botToken ?? '';
     if (slackAppTokenEl) slackAppTokenEl.value = cfg.slack?.appToken ?? '';
     if (slackChannelIdEl) slackChannelIdEl.value = cfg.slack?.channelId ?? '';
+    if (hardwareEnabledEl) hardwareEnabledEl.checked = cfg.hardware?.enabled === true;
     await refreshSlackStatus(m);
+    await refreshHardwareStatus(m);
     if (errorEl) errorEl.hidden = true;
 
     abbrevsEl.innerHTML = '';
@@ -205,6 +236,38 @@ eventLoggingEl.onchange = () => {
     eventLoggingEnabled: eventLoggingEl.checked,
   });
 };
+
+if (hardwareEnabledEl) {
+  hardwareEnabledEl.onchange = async () => {
+    hardwareEnabledEl.disabled = true;
+    try {
+      await window.combrief?.setConfig({ hardware: { enabled: hardwareEnabledEl.checked } });
+      await refresh();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+      try {
+        await refresh();
+      } catch {
+        // Keep the original error visible if refreshing the actual state also fails.
+      }
+    } finally {
+      hardwareEnabledEl.disabled = false;
+    }
+  };
+}
+if (hardwareTestDisplayEl) {
+  hardwareTestDisplayEl.onclick = async () => {
+    hardwareTestDisplayEl.disabled = true;
+    try {
+      await window.combrief?.testHardwareDisplay?.();
+      if (strings) await refreshHardwareStatus(strings);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+    } finally {
+      hardwareTestDisplayEl.disabled = false;
+    }
+  };
+}
 
 function slackPatch() {
   return {
