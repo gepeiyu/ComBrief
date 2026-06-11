@@ -1,0 +1,30 @@
+name: combrief_remote
+version: 0.1.0
+description: ComBrief Remote firmware skeleton for HaaS EDU K1
+type: solution
+tag: application
+keywords:
+  - haas
+  - haas-edu-k1
+  - ble
+  - combrief
+license: MIT
+board: haaseduk1
+source_file:
+  - combrief_remote.c
+  - app_state/*.c
+  - protocol/*.c
+  - ble_service/*.c
+  - display/*.c
+  - input/*.c
+  - led/*.c
+  - power/*.c
+include:
+  - .
+  - app_state
+  - protocol
+  - ble_service
+  - display
+  - input
+  - led
+  - power

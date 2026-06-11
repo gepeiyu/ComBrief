@@ -13,6 +13,7 @@ import type { HardwareConnectionStatus, HardwareTransport } from './transport';
 
 export interface HardwareRuntimeCallbacks {
   onDecision?: (message: HardwareDecisionMessage) => void;
+  onHello?: () => void | Promise<void>;
 }
 
 export interface HardwareRuntimeStatus extends HardwareConnectionStatus {
@@ -94,6 +95,7 @@ export class HardwareRuntime {
         fwVersion: message.fwVersion,
         battery: typeof message.battery === 'number' ? message.battery : this.device.battery,
       };
+      void this.callbacks.onHello?.();
       return;
     }
 

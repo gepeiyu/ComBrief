@@ -27,8 +27,11 @@ describe('i18n', () => {
       'hardwareSection',
       'hardwareEnabled',
       'hardwareTestDisplay',
+      'hardwareConnect',
+      'hardwareDisconnect',
       'hardwareStatusConnected',
       'hardwareStatusDisconnected',
+      'hardwareStatusNeedsReconnect',
     ] as const;
 
     for (const locale of ['en', 'zh', 'ja'] as const) {

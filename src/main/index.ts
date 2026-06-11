@@ -31,12 +31,14 @@ import { SlackRuntime } from './slack-runtime';
 import { TrayManager } from './tray-manager';
 import { APP_REGISTRY } from './apps/registry';
 import { HardwareRuntime } from './hardware/runtime';
-import { MockHardwareTransport } from './hardware/mock-transport';
+import { WebBluetoothBridgeTransport } from './hardware/web-bluetooth-bridge-transport';
+import { createWebBluetoothBridgeWindowManager } from './hardware/web-bluetooth-bridge-window';
 
 let controller: AppController;
 let trayManager: TrayManager;
 let slackRuntime: SlackRuntime;
 let hardwareRuntime: HardwareRuntime;
+let hardwareTransport: WebBluetoothBridgeTransport;
 let mainWindow: BrowserWindow | null = null;
 const registeredApps = new Set<string>();
 
@@ -191,6 +193,23 @@ function registerIpc(): void {
 
   ipcMain.handle('hardware:status', () => hardwareRuntime.getStatus());
 
+  ipcMain.handle('hardware:connect', async () => {
+    if (!controller.getConfig().hardware.enabled) {
+      controller.updateConfig({
+        hardware: { ...controller.getConfig().hardware, enabled: true },
+      });
+      saveConfig(combriefHome(), controller.getConfig());
+    }
+    await hardwareRuntime.start();
+    await hardwareTransport.openPairing();
+    return hardwareRuntime.getStatus();
+  });
+
+  ipcMain.handle('hardware:disconnect', async () => {
+    await hardwareRuntime.stop();
+    return hardwareRuntime.getStatus();
+  });
+
   ipcMain.handle('hardware:testDisplay', async () => {
     await hardwareRuntime.sendResolved({
       protocol: 1,
@@ -248,11 +267,20 @@ app.whenReady().then(async () => {
   controller = new AppController(cfg, trayManager);
   controller.bootstrapRegisteredApps();
 
-  hardwareRuntime = new HardwareRuntime(new MockHardwareTransport(), {
-    onDecision: (message) => {
-      slackRuntime.getDecisionService()?.resolveFromHardware(message);
-    },
+  const bridgeWindowManager = createWebBluetoothBridgeWindowManager({
+    preloadPath: join(__dirname, '..', 'preload', 'hardware-bridge-preload.js'),
+    rendererPath: join(__dirname, '..', 'renderer', 'hardware-bridge.html'),
   });
+  hardwareTransport = new WebBluetoothBridgeTransport(bridgeWindowManager, ipcMain);
+  hardwareRuntime = new HardwareRuntime(
+    hardwareTransport,
+    {
+      onDecision: (message) => {
+        slackRuntime.getDecisionService()?.resolveFromHardware(message);
+      },
+      onHello: () => sendHardwareStateSnapshotSafely(),
+    },
+  );
 
   slackRuntime = new SlackRuntime(
     () => controller.getConfig(),

@@ -1,0 +1,27 @@
+import os
+
+# Task 8 only declares planned module paths; Task 9/10 will add these source files.
+
+src = Split('''
+    combrief_remote.c
+    app_state/app_state.c
+    protocol/protocol.c
+    ble_service/ble_service.c
+    display/display.c
+    input/input.c
+    led/led.c
+    power/power.c
+''')
+
+component = aos_component('combrief_remote', src)
+
+component.add_includes(
+    '.',
+    'app_state',
+    'protocol',
+    'ble_service',
+    'display',
+    'input',
+    'led',
+    'power',
+)

@@ -85,6 +85,55 @@ describe('HardwareRuntime', () => {
     expect(runtime.getStatus()).toMatchObject({ battery: 72 });
   });
 
+  it('calls onHello after a valid hello while preserving status update', async () => {
+    const transport = new MockHardwareTransport();
+    const onHello = vi.fn();
+    const runtime = new HardwareRuntime(transport, { onHello });
+
+    await runtime.start();
+    transport.emitDeviceMessage({
+      protocol: 1,
+      type: 'hello',
+      deviceName: 'ComBrief-Remote',
+      platform: 'haas-edu-k1',
+      fwVersion: '0.1.0',
+      battery: 80,
+    });
+
+    expect(onHello).toHaveBeenCalledOnce();
+    expect(runtime.getStatus()).toMatchObject({
+      connected: true,
+      deviceName: 'ComBrief-Remote',
+      platform: 'haas-edu-k1',
+      fwVersion: '0.1.0',
+      battery: 80,
+    });
+  });
+
+  it('does not call onHello for invalid hello messages', async () => {
+    const transport = new MockHardwareTransport();
+    const onHello = vi.fn();
+    const runtime = new HardwareRuntime(transport, { onHello });
+
+    await runtime.start();
+    transport.emitDeviceMessage({
+      protocol: 2,
+      type: 'hello',
+      deviceName: 'ComBrief-Remote',
+      platform: 'haas-edu-k1',
+      fwVersion: '0.1.0',
+      battery: 80,
+    } as never);
+
+    expect(onHello).not.toHaveBeenCalled();
+    expect(runtime.getStatus()).toMatchObject({
+      deviceName: null,
+      platform: null,
+      fwVersion: null,
+      battery: null,
+    });
+  });
+
   it('sends state, request, and resolved messages through transport while started', async () => {
     const transport = new MockHardwareTransport();
     const runtime = new HardwareRuntime(transport);

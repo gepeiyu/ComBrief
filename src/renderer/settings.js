@@ -16,6 +16,8 @@ const slackTestEl = document.getElementById('slackTest');
 const slackSetupGuideEl = document.getElementById('slackSetupGuide');
 const slackStatusEl = document.getElementById('slackStatus');
 const hardwareEnabledEl = document.getElementById('hardwareEnabled');
+const hardwareConnectEl = document.getElementById('hardwareConnect');
+const hardwareDisconnectEl = document.getElementById('hardwareDisconnect');
 const hardwareTestDisplayEl = document.getElementById('hardwareTestDisplay');
 const hardwareStatusEl = document.getElementById('hardwareStatus');
 
@@ -39,6 +41,17 @@ function showLaunchAtLoginHint(issue, m) {
   const text = launchAtLoginHintMessage(issue, m);
   launchHintEl.textContent = text;
   launchHintEl.hidden = !text;
+}
+
+function setHardwareControlsDisabled(disabled) {
+  for (const el of [
+    hardwareEnabledEl,
+    hardwareConnectEl,
+    hardwareDisconnectEl,
+    hardwareTestDisplayEl,
+  ]) {
+    if (el) el.disabled = disabled;
+  }
 }
 
 function applyStaticStrings(m) {
@@ -77,6 +90,10 @@ function applyStaticStrings(m) {
   if (hardwareTestDisplayEl) {
     hardwareTestDisplayEl.textContent = m.settings.hardwareTestDisplay;
   }
+  if (hardwareConnectEl) hardwareConnectEl.textContent = m.settings.hardwareConnect;
+  if (hardwareDisconnectEl) {
+    hardwareDisconnectEl.textContent = m.settings.hardwareDisconnect;
+  }
   document.title = m.settings.windowTitle;
 }
 
@@ -105,7 +122,9 @@ async function refreshHardwareStatus(m) {
     if (st.lastError) details.push(st.lastError);
     const base = st.connected
       ? m.settings.hardwareStatusConnected
-      : m.settings.hardwareStatusDisconnected;
+      : st.started
+        ? m.settings.hardwareStatusNeedsReconnect
+        : m.settings.hardwareStatusDisconnected;
     hardwareStatusEl.textContent = details.length
       ? `${base} — ${details.join(' · ')}`
       : base;
@@ -239,7 +258,7 @@ eventLoggingEl.onchange = () => {
 
 if (hardwareEnabledEl) {
   hardwareEnabledEl.onchange = async () => {
-    hardwareEnabledEl.disabled = true;
+    setHardwareControlsDisabled(true);
     try {
       await window.combrief?.setConfig({ hardware: { enabled: hardwareEnabledEl.checked } });
       await refresh();
@@ -251,20 +270,48 @@ if (hardwareEnabledEl) {
         // Keep the original error visible if refreshing the actual state also fails.
       }
     } finally {
-      hardwareEnabledEl.disabled = false;
+      setHardwareControlsDisabled(false);
+    }
+  };
+}
+if (hardwareConnectEl) {
+  hardwareConnectEl.onclick = async () => {
+    setHardwareControlsDisabled(true);
+    try {
+      await window.combrief?.connectHardware?.();
+      await refresh();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+      if (strings) await refreshHardwareStatus(strings);
+    } finally {
+      setHardwareControlsDisabled(false);
+    }
+  };
+}
+if (hardwareDisconnectEl) {
+  hardwareDisconnectEl.onclick = async () => {
+    setHardwareControlsDisabled(true);
+    try {
+      await window.combrief?.disconnectHardware?.();
+      await refresh();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+      if (strings) await refreshHardwareStatus(strings);
+    } finally {
+      setHardwareControlsDisabled(false);
     }
   };
 }
 if (hardwareTestDisplayEl) {
   hardwareTestDisplayEl.onclick = async () => {
-    hardwareTestDisplayEl.disabled = true;
+    setHardwareControlsDisabled(true);
     try {
       await window.combrief?.testHardwareDisplay?.();
       if (strings) await refreshHardwareStatus(strings);
     } catch (err) {
       showError(err instanceof Error ? err.message : String(err));
     } finally {
-      hardwareTestDisplayEl.disabled = false;
+      setHardwareControlsDisabled(false);
     }
   };
 }

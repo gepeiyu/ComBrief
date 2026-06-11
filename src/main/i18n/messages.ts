@@ -45,9 +45,12 @@ export type Messages = {
     slackStatusDisconnected: string;
     hardwareSection: string;
     hardwareEnabled: string;
+    hardwareConnect: string;
+    hardwareDisconnect: string;
     hardwareTestDisplay: string;
     hardwareStatusConnected: string;
     hardwareStatusDisconnected: string;
+    hardwareStatusNeedsReconnect: string;
     slackCardTitle: string;
     slackSetupGuide: string;
     slackSetupGuideTitle: string;
@@ -135,9 +138,12 @@ const en: Messages = {
     slackStatusDisconnected: 'Slack: disconnected',
     hardwareSection: 'ComBrief Remote',
     hardwareEnabled: 'Enable ComBrief Remote',
+    hardwareConnect: 'Connect Remote',
+    hardwareDisconnect: 'Disconnect',
     hardwareTestDisplay: 'Test display',
     hardwareStatusConnected: 'Remote: connected',
     hardwareStatusDisconnected: 'Remote: disconnected',
+    hardwareStatusNeedsReconnect: 'Needs reconnect',
     slackCardTitle: 'Claude Code needs your approval',
     slackSetupGuide: 'Open Slack setup guide…',
     slackSetupGuideTitle: 'Slack remote approval — setup guide',
@@ -231,9 +237,12 @@ const zh: Messages = {
     slackStatusDisconnected: 'Slack：未连接',
     hardwareSection: 'ComBrief Remote',
     hardwareEnabled: '启用 ComBrief Remote',
+    hardwareConnect: '连接遥控器',
+    hardwareDisconnect: '断开连接',
     hardwareTestDisplay: '测试显示',
     hardwareStatusConnected: 'Remote：已连接',
     hardwareStatusDisconnected: 'Remote：未连接',
+    hardwareStatusNeedsReconnect: '需要重新连接',
     slackCardTitle: 'Claude Code 需要你确认',
     slackSetupGuide: '打开 Slack 配置指南…',
     slackSetupGuideTitle: 'Slack 远程确认 — 配置指南',
@@ -327,9 +336,12 @@ const ja: Messages = {
     slackStatusDisconnected: 'Slack: 未接続',
     hardwareSection: 'ComBrief Remote',
     hardwareEnabled: 'ComBrief Remote を有効化',
+    hardwareConnect: 'リモコンに接続',
+    hardwareDisconnect: '切断',
     hardwareTestDisplay: '表示をテスト',
     hardwareStatusConnected: 'Remote: 接続済み',
     hardwareStatusDisconnected: 'Remote: 未接続',
+    hardwareStatusNeedsReconnect: '再接続が必要です',
     slackCardTitle: 'Claude Code の承認が必要です',
     slackSetupGuide: 'Slack 設定ガイドを開く…',
     slackSetupGuideTitle: 'Slack リモート承認 — 設定ガイド',

@@ -21,6 +21,8 @@ for (const file of [
   'about.html',
   'slack-setup-guide.html',
   'slack-setup-guide.js',
+  'hardware-bridge.html',
+  'hardware-bridge.js',
 ]) {
   const src = join(root, 'src', 'renderer', file);
   if (existsSync(src)) {
