@@ -3,6 +3,7 @@ export const HARDWARE_BRIDGE_CHANNELS = {
   startScan: 'hardwareBridge:startScan',
   connect: 'hardwareBridge:connect',
   disconnect: 'hardwareBridge:disconnect',
+  sendFastState: 'hardwareBridge:sendFastState',
   sendHostMessage: 'hardwareBridge:sendHostMessage',
   hostMessageResult: 'hardwareBridge:hostMessageResult',
   getStatus: 'hardwareBridge:getStatus',

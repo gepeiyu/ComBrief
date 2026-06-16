@@ -6,12 +6,14 @@ import {
 } from './bridge-ipc';
 import type {
   HardwareDeviceMessage,
+  HardwareFastStateSignal,
   HardwareHostMessage,
 } from './protocol';
 import {
   isHardwareBatteryMessage,
   isHardwareDecisionMessage,
   isHardwareHelloMessage,
+  isHardwareHostAckMessage,
 } from './protocol';
 import type { HardwareConnectionStatus, HardwareTransport } from './transport';
 import type { WebBluetoothBridgeWindowManager } from './web-bluetooth-bridge-window';
@@ -68,6 +70,11 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
       return;
     }
 
+    if (isHardwareHostAckMessage(payload)) {
+      this.resolveHostAck(payload.hostMessageId, payload.ok, payload.error);
+      return;
+    }
+
     for (const handler of this.messageHandlers) {
       handler(payload);
     }
@@ -83,13 +90,12 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
       return;
     }
 
-    clearTimeout(pending.timeout);
-    this.pendingHostMessages.delete(payload.id);
     if (payload.ok) {
-      pending.resolve();
       return;
     }
 
+    clearTimeout(pending.timeout);
+    this.pendingHostMessages.delete(payload.id);
     const message = payload.error || 'ComBrief Remote host message write failed';
     this.status = { ...this.status, lastError: message };
     pending.reject(new Error(message));
@@ -171,6 +177,20 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     return { ...this.status };
   }
 
+  async sendFastState(signal: HardwareFastStateSignal): Promise<void> {
+    if (!this.status.started) {
+      throw new Error('ComBrief Remote bridge is not started');
+    }
+
+    const bridgeWindow = this.manager.getWindow();
+    if (!bridgeWindow) {
+      this.markBridgeWindowClosed();
+      throw new Error('ComBrief Remote bridge is not running');
+    }
+
+    bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendFastState, signal);
+  }
+
   async send(message: HardwareHostMessage): Promise<void> {
     if (!this.status.started) {
       throw new Error('ComBrief Remote bridge is not started');
@@ -183,6 +203,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     }
 
     const id = `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const messageWithAckId: HardwareHostMessage = { ...message, hostMessageId: id };
     const result = new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingHostMessages.delete(id);
@@ -195,7 +216,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 
     bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, {
       id,
-      message,
+      message: messageWithAckId,
     });
     return result;
   }
@@ -234,6 +255,24 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     }
   }
 
+  private resolveHostAck(id: string, ok: boolean, error: string | undefined): void {
+    const pending = this.pendingHostMessages.get(id);
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+    this.pendingHostMessages.delete(id);
+    if (ok) {
+      pending.resolve();
+      return;
+    }
+
+    const message = error || 'ComBrief Remote rejected host message';
+    this.status = { ...this.status, lastError: message };
+    pending.reject(new Error(message));
+  }
+
   private subscribeBridgeEvents(): void {
     if (this.subscribed) {
       return;
@@ -262,6 +301,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 function isHardwareDeviceMessage(value: unknown): value is HardwareDeviceMessage {
   return (
     isHardwareHelloMessage(value) ||
+    isHardwareHostAckMessage(value) ||
     isHardwareDecisionMessage(value) ||
     isHardwareBatteryMessage(value)
   );

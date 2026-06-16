@@ -72,6 +72,7 @@ describe('hardware bridge renderer assets', () => {
     expect(preload).toContain('onStartScan');
     expect(preload).toContain('onConnect');
     expect(preload).toContain('onDisconnect');
+    expect(preload).toContain('onSendFastState');
     expect(preload).toContain('onSendHostMessage');
     expect(preload).toContain('sendReady');
     expect(preload).toContain('sendStatus');
@@ -734,22 +735,24 @@ describe('hardware bridge renderer assets', () => {
     expect(renderer).toMatch(/sendStatus\(\{ started: true \}\);\s*$/);
   });
 
-  it('reports host write success back to the main process', async () => {
+  it('writes fast state signals to the BLE control characteristic without queueing host ACKs', async () => {
     function flush(): Promise<void> {
       return new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     const renderer = readProjectFile('src/renderer/hardware-bridge.js');
     const callbacks = new Map<string, (payload?: unknown) => void>();
-    const hostResults: Array<Record<string, unknown>> = [];
     const bridgeDocument = createBridgeDocument();
-    let writeWithResponseCalls = 0;
+    const controlWrites: string[] = [];
+    const decoder = new TextDecoder();
     const hostTx = {
-      async writeValueWithResponse() {
-        writeWithResponseCalls += 1;
-      },
       async writeValueWithoutResponse() {
-        throw new Error('without response should not be used for host probes');
+        throw new Error('host TX should not receive fast status');
+      },
+    };
+    const controlTx = {
+      async writeValueWithoutResponse(bytes: Uint8Array) {
+        controlWrites.push(decoder.decode(bytes));
       },
     };
     const deviceTx = {
@@ -782,7 +785,107 @@ describe('hardware bridge renderer assets', () => {
             async getPrimaryService() {
               return {
                 async getCharacteristic(uuid: string) {
-                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                  if (uuid.startsWith('7b5c0002')) return hostTx;
+                  if (uuid.startsWith('7b5c0005')) return controlTx;
+                  return deviceTx;
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => fakeDevice,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendFastState: (handler: (payload?: unknown) => void) => callbacks.set('sendFastState', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: () => undefined,
+          sendDeviceMessage: () => undefined,
+          sendError: () => undefined,
+          sendHostMessageResult: () => undefined,
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+    bridgeDocument.clickConnect();
+    await flush();
+    await flush();
+    await flush();
+
+    callbacks.get('sendFastState')?.({ seq: 9, label: 'CC', status: 'working' });
+    await flush();
+
+    expect(controlWrites).toEqual(['S:9:working:CC']);
+  });
+
+  it('reports host write success back to the main process', async () => {
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const hostResults: Array<Record<string, unknown>> = [];
+    const bridgeDocument = createBridgeDocument();
+    let writeWithResponseCalls = 0;
+    let writeWithoutResponseCalls = 0;
+    const hostTx = {
+      async writeValueWithResponse() {
+        writeWithResponseCalls += 1;
+        throw new Error('confirmed writes should not be used for fast host sync');
+      },
+      async writeValueWithoutResponse() {
+        writeWithoutResponseCalls += 1;
+      },
+    };
+    const deviceTx = {
+      async startNotifications() {
+        return undefined;
+      },
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+    };
+    const fakeDevice = {
+      name: 'ComBrief',
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+      gatt: {
+        connected: false,
+        disconnect() {
+          this.connected = false;
+        },
+        async connect() {
+          this.connected = true;
+          return {
+            async getPrimaryService() {
+              return {
+                async getCharacteristic(uuid: string) {
+                  if (uuid.startsWith('7b5c0002')) return hostTx;
+                  return deviceTx;
                 },
               };
             },
@@ -828,11 +931,12 @@ describe('hardware bridge renderer assets', () => {
     });
     await waitForHostWrites();
 
-    expect(writeWithResponseCalls).toBeGreaterThan(1);
+    expect(writeWithResponseCalls).toBe(0);
+    expect(writeWithoutResponseCalls).toBeGreaterThan(1);
     expect(hostResults).toEqual([{ id: 'host-write-1', ok: true, error: null }]);
   });
 
-  it('splits host messages into confirmed BLE-sized chunks', async () => {
+  it('splits host messages into unconfirmed BLE-sized chunks', async () => {
     function flush(): Promise<void> {
       return new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -844,8 +948,11 @@ describe('hardware bridge renderer assets', () => {
     const chunks: string[] = [];
     const decoder = new TextDecoder();
     const hostTx = {
-      async writeValueWithResponse(bytes: Uint8Array) {
+      async writeValueWithoutResponse(bytes: Uint8Array) {
         chunks.push(decoder.decode(bytes));
+      },
+      async writeValueWithResponse() {
+        throw new Error('confirmed writes should not be used for chunked host sync');
       },
     };
     const deviceTx = {
@@ -878,7 +985,8 @@ describe('hardware bridge renderer assets', () => {
             async getPrimaryService() {
               return {
                 async getCharacteristic(uuid: string) {
-                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                  if (uuid.startsWith('7b5c0002')) return hostTx;
+                  return deviceTx;
                 },
               };
             },
@@ -944,7 +1052,7 @@ describe('hardware bridge renderer assets', () => {
     expect(hostResults).toEqual([{ id: 'host-write-chunked', ok: true, error: null }]);
   });
 
-  it('reports host write errors instead of falling back to unconfirmed writes', async () => {
+  it('reports unconfirmed host write errors instead of falling back to confirmed writes', async () => {
     function flush(): Promise<void> {
       return new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -954,13 +1062,13 @@ describe('hardware bridge renderer assets', () => {
     const hostResults: Array<Record<string, unknown>> = [];
     const errors: string[] = [];
     const bridgeDocument = createBridgeDocument();
-    let writeWithoutResponseCalls = 0;
+    let writeWithResponseCalls = 0;
     const hostTx = {
       async writeValueWithResponse() {
-        throw new Error('GATT write with response failed');
+        writeWithResponseCalls += 1;
       },
       async writeValueWithoutResponse() {
-        writeWithoutResponseCalls += 1;
+        throw new Error('GATT write without response failed');
       },
     };
     const deviceTx = {
@@ -993,7 +1101,8 @@ describe('hardware bridge renderer assets', () => {
             async getPrimaryService() {
               return {
                 async getCharacteristic(uuid: string) {
-                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                  if (uuid.startsWith('7b5c0002')) return hostTx;
+                  return deviceTx;
                 },
               };
             },
@@ -1039,11 +1148,11 @@ describe('hardware bridge renderer assets', () => {
     });
     await waitForHostWrites();
 
-    expect(writeWithoutResponseCalls).toBe(0);
+    expect(writeWithResponseCalls).toBe(0);
     expect(hostResults).toEqual([
-      { id: 'host-write-2', ok: false, error: 'GATT write with response failed' },
+      { id: 'host-write-2', ok: false, error: 'GATT write without response failed' },
     ]);
-    expect(errors).toEqual(['GATT write with response failed']);
+    expect(errors).toEqual(['GATT write without response failed']);
   });
 
   it('serializes concurrent host messages so BLE chunks are not interleaved', async () => {
@@ -1072,9 +1181,12 @@ describe('hardware bridge renderer assets', () => {
     const decoder = new TextDecoder();
     let writeDelayMs = 5;
     const hostTx = {
-      async writeValueWithResponse(bytes: Uint8Array) {
+      async writeValueWithoutResponse(bytes: Uint8Array) {
         await new Promise((resolve) => setTimeout(resolve, writeDelayMs));
         chunks.push(decoder.decode(bytes));
+      },
+      async writeValueWithResponse() {
+        throw new Error('confirmed writes should not be used for queued host sync');
       },
     };
     const deviceTx = {
@@ -1107,7 +1219,8 @@ describe('hardware bridge renderer assets', () => {
             async getPrimaryService() {
               return {
                 async getCharacteristic(uuid: string) {
-                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                  if (uuid.startsWith('7b5c0002')) return hostTx;
+                  return deviceTx;
                 },
               };
             },

@@ -1,6 +1,7 @@
 const SERVICE_UUID = '7b5c0001-8d4a-4c3a-9b4f-434252465001';
 const HOST_TX_UUID = '7b5c0002-8d4a-4c3a-9b4f-434252465001';
 const DEVICE_TX_UUID = '7b5c0003-8d4a-4c3a-9b4f-434252465001';
+const CONTROL_UUID = '7b5c0005-8d4a-4c3a-9b4f-434252465001';
 const REMOTE_NAME = 'ComBrief';
 const BRIDGE_V1_SINGLE_FRAME_MAX_BYTES = 500;
 const BLE_WRITE_CHUNK_BYTES = 20;
@@ -38,6 +39,7 @@ let device = null;
 let server = null;
 let service = null;
 let hostTxCharacteristic = null;
+let controlCharacteristic = null;
 let deviceTxCharacteristic = null;
 let connectPromise = null;
 let connectionEpoch = 0;
@@ -86,6 +88,7 @@ function createConnectionResources() {
     localServer: null,
     localService: null,
     localHostTx: null,
+    localControl: null,
     localDeviceTx: null,
     localNotificationListener: null,
     localDisconnectListener: null,
@@ -157,6 +160,7 @@ function resetConnectionState() {
   server = null;
   service = null;
   hostTxCharacteristic = null;
+  controlCharacteristic = null;
   deviceTxCharacteristic = null;
   hostSendChain = Promise.resolve();
 }
@@ -179,6 +183,7 @@ function publishConnectionResources(resources) {
   server = resources.localServer;
   service = resources.localService;
   hostTxCharacteristic = resources.localHostTx;
+  controlCharacteristic = resources.localControl;
   deviceTxCharacteristic = resources.localDeviceTx;
   notificationListener = resources.localNotificationListener;
   disconnectListenerDevice = resources.localDisconnectListenerDevice;
@@ -226,6 +231,9 @@ async function connectOnce(activeEpoch) {
     if (abortStaleConnection(activeEpoch, resources)) return;
 
     resources.localHostTx = await resources.localService.getCharacteristic(HOST_TX_UUID);
+    if (abortStaleConnection(activeEpoch, resources)) return;
+
+    resources.localControl = await resources.localService.getCharacteristic(CONTROL_UUID);
     if (abortStaleConnection(activeEpoch, resources)) return;
 
     resources.localDeviceTx = await resources.localService.getCharacteristic(DEVICE_TX_UUID);
@@ -293,18 +301,13 @@ function disconnect() {
   }
 }
 
-async function writeConfirmedBytes(bytes) {
-  if (typeof hostTxCharacteristic.writeValueWithResponse === 'function') {
-    await hostTxCharacteristic.writeValueWithResponse(bytes);
+async function writeUnconfirmedBytes(characteristic, bytes) {
+  if (typeof characteristic?.writeValueWithoutResponse === 'function') {
+    await characteristic.writeValueWithoutResponse(bytes);
     return;
   }
 
-  if (typeof hostTxCharacteristic.writeValue === 'function') {
-    await hostTxCharacteristic.writeValue(bytes);
-    return;
-  }
-
-  throw new Error('ComBrief Remote host characteristic does not support confirmed writes');
+  throw new Error('ComBrief Remote characteristic does not support unconfirmed writes');
 }
 
 async function writeHostBytes(bytes) {
@@ -314,7 +317,7 @@ async function writeHostBytes(bytes) {
     const chunk = new Uint8Array(1 + end - offset);
     chunk[0] = prefix;
     chunk.set(bytes.slice(offset, end), 1);
-    await writeConfirmedBytes(chunk);
+    await writeUnconfirmedBytes(hostTxCharacteristic, chunk);
     if (end < bytes.byteLength) {
       await delay(BLE_CHUNK_DELAY_MS);
     }
@@ -358,6 +361,22 @@ async function sendHostMessageInner(command) {
   }
 }
 
+async function sendFastState(signal) {
+  try {
+    if (!controlCharacteristic || !status.connected) {
+      if (status.scanning) return;
+      throw new Error('ComBrief Remote is not connected');
+    }
+
+    const seq = Number.isFinite(signal?.seq) ? Math.max(0, Math.trunc(signal.seq)) : 0;
+    const label = typeof signal?.label === 'string' && signal.label.length > 0 ? signal.label.slice(0, 12) : 'CB';
+    const state = typeof signal?.status === 'string' ? signal.status : 'idle';
+    await writeUnconfirmedBytes(controlCharacteristic, encoder.encode(`S:${seq}:${state}:${label}`));
+  } catch (error) {
+    reportError(error);
+  }
+}
+
 function enqueueHostMessage(command) {
   const task = hostSendChain.then(() => sendHostMessageInner(command));
   hostSendChain = task.catch(() => undefined);
@@ -381,6 +400,9 @@ connectButton?.addEventListener('click', () => {
 });
 window.combriefHardwareBridge?.onDisconnect(() => {
   disconnect();
+});
+window.combriefHardwareBridge?.onSendFastState?.((signal) => {
+  void sendFastState(signal);
 });
 window.combriefHardwareBridge?.onSendHostMessage((message) => {
   void enqueueHostMessage(message);

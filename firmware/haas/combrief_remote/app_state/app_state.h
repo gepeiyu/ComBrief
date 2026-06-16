@@ -44,6 +44,7 @@ typedef struct {
     uint8_t selected_option;
     uint8_t full_page;
     bool waiting_resolved;
+    bool waiting_request_content;
     char last_resolved_result[24];
 } combrief_app_state_t;
 
@@ -56,6 +57,7 @@ const combrief_app_state_t *combrief_app_state_get(void);
 void combrief_app_state_set_ble_connected(combrief_app_state_t *state, bool connected);
 void combrief_app_state_set_primary_status(combrief_app_state_t *state, const char *status);
 void combrief_app_state_set_app_summary(combrief_app_state_t *state, const char *summary);
+void combrief_app_state_apply_fast_status(combrief_app_state_t *state, const char *label, const char *status);
 void combrief_app_state_set_battery(combrief_app_state_t *state, uint8_t percent);
 void combrief_app_state_set_battery_unknown(combrief_app_state_t *state);
 bool combrief_app_state_set_request(

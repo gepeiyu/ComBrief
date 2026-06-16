@@ -103,6 +103,54 @@ void combrief_app_state_set_app_summary(combrief_app_state_t *state, const char 
     copy_bounded(state->app_summary, sizeof(state->app_summary), summary);
 }
 
+void combrief_app_state_apply_fast_status(combrief_app_state_t *state, const char *label, const char *status)
+{
+    const char *safe_label = label != NULL && label[0] != '\0' ? label : "CB";
+    const char *status_label = "OK";
+    char summary[64];
+
+    if (state == NULL) {
+        return;
+    }
+
+    if (status != NULL && strcmp(status, "working") == 0) {
+        status_label = "WORK";
+        state->remote_state = COMBRIEF_REMOTE_IDLE;
+        copy_bounded(state->primary_status, sizeof(state->primary_status), "working");
+        state->decision_id[0] = '\0';
+        state->option_count = 0;
+    } else if (status != NULL && strcmp(status, "waiting_user") == 0) {
+        status_label = "ASK";
+        state->remote_state = COMBRIEF_REMOTE_IDLE;
+        copy_bounded(state->primary_status, sizeof(state->primary_status), "waiting_user");
+        state->decision_id[0] = '\0';
+        state->option_count = 0;
+        state->waiting_request_content = true;
+    } else if (status != NULL && strcmp(status, "offline") == 0) {
+        status_label = "OFF";
+        state->remote_state = COMBRIEF_REMOTE_IDLE;
+        copy_bounded(state->primary_status, sizeof(state->primary_status), "offline");
+        state->decision_id[0] = '\0';
+        state->option_count = 0;
+    } else {
+        state->remote_state = state->ble_connected ? COMBRIEF_REMOTE_IDLE : COMBRIEF_REMOTE_DISCONNECTED;
+        copy_bounded(state->primary_status, sizeof(state->primary_status), "idle");
+        state->decision_id[0] = '\0';
+        state->option_count = 0;
+    }
+
+    state->waiting_resolved = false;
+    state->waiting_request_content = status != NULL && strcmp(status, "waiting_user") == 0;
+    state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
+    state->full_page = 0;
+    if (status != NULL && strcmp(status, "waiting_user") == 0) {
+        (void)snprintf(summary, sizeof(summary), "%s [%s]\nLoading...", safe_label, status_label);
+    } else {
+        (void)snprintf(summary, sizeof(summary), "%s [%s]", safe_label, status_label);
+    }
+    copy_bounded(state->app_summary, sizeof(state->app_summary), summary);
+}
+
 void combrief_app_state_set_battery(combrief_app_state_t *state, uint8_t percent)
 {
     if (state == NULL) {
@@ -137,6 +185,7 @@ void combrief_app_state_clear_request(combrief_app_state_t *state)
     state->selected_option = 0;
     state->full_page = 0;
     state->waiting_resolved = false;
+    state->waiting_request_content = false;
     state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
     state->remote_state = state->ble_connected ? COMBRIEF_REMOTE_IDLE : COMBRIEF_REMOTE_DISCONNECTED;
     state->app_summary[0] = '\0';
@@ -176,6 +225,7 @@ bool combrief_app_state_set_request(
     state->selected_option = 0;
     state->full_page = 0;
     state->waiting_resolved = false;
+    state->waiting_request_content = false;
     state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
     state->remote_state = COMBRIEF_REMOTE_REQUEST_ACTIVE;
     copy_bounded(

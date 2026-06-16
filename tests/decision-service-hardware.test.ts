@@ -95,7 +95,7 @@ describe('DecisionService hardware channel', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       type: 'request',
-      brief: 'Do you want to proceed?',
+      brief: '执行命令\nnpm install',
     });
 
     vi.advanceTimersByTime(51_000);

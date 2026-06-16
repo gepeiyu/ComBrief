@@ -6,6 +6,7 @@
 #include "../app_state/app_state.h"
 
 #if defined(BOARD_HAASEDUK1)
+#include <aos/kernel.h>
 #define COMBRIEF_HAS_HAAS_LED 1
 typedef enum { LED_OFF, LED_ON } led_e;
 typedef enum { LED1_NUM = 1, LED2_NUM = 2, LED3_NUM = 3 } led_num_e;
@@ -30,10 +31,16 @@ typedef enum {
 } combrief_led_view_t;
 
 #define COMBRIEF_ADVERTISING_LED_HOLD_TICKS 4
+#define COMBRIEF_WORKING_PWM_STEPS 7
+#define COMBRIEF_SOFTWARE_PWM_PERIOD_MS 20
+#define COMBRIEF_SOFTWARE_PWM_UPDATE_FRAMES 4
 
 static uint8_t g_advertising_cycle;
 static uint8_t g_advertising_hold_ticks;
 static uint8_t g_working_breath_tick;
+static bool g_working_breath_up;
+static volatile bool g_blue_software_breathing;
+static volatile uint8_t g_blue_software_target;
 static uint8_t g_waiting_user_breath_tick;
 
 static led_num_e board_led_for_color(combrief_led_color_t color)
@@ -49,9 +56,16 @@ static led_num_e board_led_for_color(combrief_led_color_t color)
     }
 }
 
+static void disable_blue_software_breathing(void)
+{
+    g_blue_software_breathing = false;
+    g_blue_software_target = 0;
+}
+
 static void set_board_leds(combrief_led_color_t color)
 {
 #if COMBRIEF_HAS_HAAS_LED
+    disable_blue_software_breathing();
     led_switch(LED1_NUM, color == COMBRIEF_LED_RED ? LED_ON : LED_OFF);
     led_switch(LED2_NUM, color == COMBRIEF_LED_GREEN ? LED_ON : LED_OFF);
     led_switch(LED3_NUM, color == COMBRIEF_LED_BLUE ? LED_ON : LED_OFF);
@@ -63,11 +77,71 @@ static void set_board_leds(combrief_led_color_t color)
 static void set_board_leds_off(void)
 {
 #if COMBRIEF_HAS_HAAS_LED
+    disable_blue_software_breathing();
     led_switch(LED1_NUM, LED_OFF);
     led_switch(LED2_NUM, LED_OFF);
     led_switch(LED3_NUM, LED_OFF);
 #endif
 }
+
+static void run_blue_software_pwm_frame(uint8_t target)
+{
+#if COMBRIEF_HAS_HAAS_LED
+    uint32_t on_ms = ((uint32_t)target * COMBRIEF_SOFTWARE_PWM_PERIOD_MS) / 100U;
+    uint32_t off_ms = COMBRIEF_SOFTWARE_PWM_PERIOD_MS - on_ms;
+
+    led_switch(LED1_NUM, LED_OFF);
+    led_switch(LED2_NUM, LED_OFF);
+    if (on_ms > 0U) {
+        led_switch(LED3_NUM, LED_ON);
+        aos_msleep(on_ms);
+    }
+    if (off_ms > 0U) {
+        led_switch(LED3_NUM, LED_OFF);
+        aos_msleep(off_ms);
+    }
+#else
+    (void)target;
+#endif
+}
+
+#if COMBRIEF_HAS_HAAS_LED
+static void led_software_pwm_task(void *arg)
+{
+    uint8_t brightness = 10;
+    uint8_t frame_count = 0;
+    bool breath_up = true;
+
+    (void)arg;
+    while (1) {
+        if (g_blue_software_breathing) {
+            run_blue_software_pwm_frame(brightness);
+            frame_count++;
+            if (frame_count >= COMBRIEF_SOFTWARE_PWM_UPDATE_FRAMES) {
+                frame_count = 0;
+                if (breath_up) {
+                    if (brightness >= 100) {
+                        breath_up = false;
+                        brightness = 98;
+                    } else {
+                        brightness = (uint8_t)(brightness + 2);
+                    }
+                } else if (brightness <= 10) {
+                    breath_up = true;
+                    brightness = 12;
+                } else {
+                    brightness = (uint8_t)(brightness - 2);
+                }
+            }
+        } else {
+            brightness = 10;
+            frame_count = 0;
+            breath_up = true;
+            aos_msleep(COMBRIEF_SOFTWARE_PWM_PERIOD_MS);
+        }
+    }
+}
+#endif
 
 static void set_led(combrief_led_color_t color, const char *reason)
 {
@@ -89,14 +163,29 @@ static void set_red_breathing_led(void)
 
 static void set_blue_breathing_led(void)
 {
-    if (g_working_breath_tick < 3) {
-        set_board_leds(COMBRIEF_LED_BLUE);
-        printf("LED blue: connected working blue breathing on\n");
+    static const uint8_t brightness_steps[COMBRIEF_WORKING_PWM_STEPS] = {10, 25, 40, 55, 70, 85, 100};
+    uint8_t target = brightness_steps[g_working_breath_tick];
+
+#if COMBRIEF_HAS_HAAS_LED
+    g_blue_software_target = target;
+    g_blue_software_breathing = true;
+#else
+    (void)target;
+#endif
+    printf("LED blue: connected working blue software breathing target=%u\n", (unsigned int)target);
+    if (g_working_breath_up) {
+        if (g_working_breath_tick + 1 >= COMBRIEF_WORKING_PWM_STEPS) {
+            g_working_breath_up = false;
+            g_working_breath_tick--;
+        } else {
+            g_working_breath_tick++;
+        }
+    } else if (g_working_breath_tick == 0) {
+        g_working_breath_up = true;
+        g_working_breath_tick++;
     } else {
-        set_board_leds_off();
-        printf("LED blue off: connected working blue breathing\n");
+        g_working_breath_tick--;
     }
-    g_working_breath_tick = (uint8_t)((g_working_breath_tick + 1) % 4);
 }
 
 static bool status_is_waiting_user(const combrief_app_state_t *state)
@@ -139,9 +228,18 @@ void led_init(void)
     g_advertising_cycle = 0;
     g_advertising_hold_ticks = 0;
     g_working_breath_tick = 0;
+    g_working_breath_up = true;
+    g_blue_software_breathing = false;
+    g_blue_software_target = 0;
     g_waiting_user_breath_tick = 0;
+#if COMBRIEF_HAS_HAAS_LED
+    aos_task_t task;
+    int task_result = aos_task_new_ext(&task, "cmb_led_pwm", led_software_pwm_task, NULL, 1024, 40);
+#else
+    int task_result = 0;
+#endif
     set_board_leds(COMBRIEF_LED_RED);
-    printf("ComBrief LED init priority red > green > blue\n");
+    printf("ComBrief LED init priority red > green > blue software_pwm_task=%d\n", task_result);
 }
 
 void led_render(void)

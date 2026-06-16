@@ -85,7 +85,7 @@ bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app
         return write_payload(
             out,
             out_len,
-            "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"battery\":%u,\"capabilities\":{\"briefFullToggle\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
+            "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"battery\":%u,\"capabilities\":{\"briefFullToggle\":true,\"hostAck\":true,\"unconfirmedWrites\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
             COMBRIEF_REMOTE_NAME,
             COMBRIEF_REMOTE_PLATFORM,
             COMBRIEF_REMOTE_FW_VERSION,
@@ -98,7 +98,7 @@ bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app
     return write_payload(
         out,
         out_len,
-        "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"capabilities\":{\"briefFullToggle\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
+        "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"capabilities\":{\"briefFullToggle\":true,\"hostAck\":true,\"unconfirmedWrites\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
         COMBRIEF_REMOTE_NAME,
         COMBRIEF_REMOTE_PLATFORM,
         COMBRIEF_REMOTE_FW_VERSION,
@@ -149,6 +149,38 @@ bool combrief_protocol_build_battery(char *out, size_t out_len, const combrief_a
         out_len,
         "{\"protocol\":1,\"type\":\"battery\",\"battery\":%u}",
         (unsigned int)state->battery_percent);
+}
+
+bool combrief_protocol_build_host_ack(char *out, size_t out_len, const char *host_message_id, bool ok, const char *error)
+{
+    char id[96];
+    char escaped_error[128];
+
+    if (host_message_id == NULL || host_message_id[0] == '\0' ||
+        !json_escape(id, sizeof(id), host_message_id)) {
+        return false;
+    }
+
+    if (ok) {
+        return write_payload(
+            out,
+            out_len,
+            "{\"protocol\":1,\"type\":\"ack\",\"hostMessageId\":\"%s\",\"ok\":true,\"ts\":%u}",
+            id,
+            (unsigned int)time(NULL));
+    }
+
+    if (!json_escape(escaped_error, sizeof(escaped_error), error != NULL && error[0] != '\0' ? error : "host message failed")) {
+        return false;
+    }
+
+    return write_payload(
+        out,
+        out_len,
+        "{\"protocol\":1,\"type\":\"ack\",\"hostMessageId\":\"%s\",\"ok\":false,\"error\":\"%s\",\"ts\":%u}",
+        id,
+        escaped_error,
+        (unsigned int)time(NULL));
 }
 
 static bool is_json_object(const char *json)
@@ -783,6 +815,8 @@ static bool apply_state_message(combrief_app_state_t *state, const char *json)
     char summary[64];
     uint8_t battery;
     bool state_changed = false;
+    bool has_summary = false;
+    bool has_status = false;
 
     summary[0] = '\0';
 
@@ -798,15 +832,25 @@ static bool apply_state_message(combrief_app_state_t *state, const char *json)
         combrief_app_state_set_battery(state, battery);
         state_changed = true;
     }
-    if (extract_top_level_string(json, "\"appSummary\"", summary, sizeof(summary)) ||
-        extract_apps_summary(json, summary, sizeof(summary))) {
+    has_summary = extract_top_level_string(json, "\"appSummary\"", summary, sizeof(summary)) ||
+        extract_apps_summary(json, summary, sizeof(summary));
+    has_status = extract_apps_primary_status(json, status, sizeof(status)) ||
+        extract_top_level_string(json, "\"primaryStatus\"", status, sizeof(status)) ||
+        extract_top_level_string(json, "\"status\"", status, sizeof(status)) ||
+        extract_top_level_string(json, "\"primary\"", status, sizeof(status));
+
+    if (state->waiting_request_content && has_status && strcmp(status, "working") == 0) {
+        return state_changed || has_summary;
+    }
+    if (state->waiting_request_content && has_status) {
+        state->waiting_request_content = false;
+    }
+
+    if (has_summary) {
         combrief_app_state_set_app_summary(state, summary);
         state_changed = true;
     }
-    if (extract_apps_primary_status(json, status, sizeof(status)) ||
-        extract_top_level_string(json, "\"primaryStatus\"", status, sizeof(status)) ||
-        extract_top_level_string(json, "\"status\"", status, sizeof(status)) ||
-        extract_top_level_string(json, "\"primary\"", status, sizeof(status))) {
+    if (has_status) {
         combrief_app_state_set_primary_status(state, status);
         state_changed = true;
     }

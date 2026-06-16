@@ -26,6 +26,7 @@ void protocol_tick(void);
 bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app_state_t *state);
 bool combrief_protocol_build_decision(char *out, size_t out_len, const combrief_app_state_t *state);
 bool combrief_protocol_build_battery(char *out, size_t out_len, const combrief_app_state_t *state);
+bool combrief_protocol_build_host_ack(char *out, size_t out_len, const char *host_message_id, bool ok, const char *error);
 bool combrief_protocol_apply_host_message(combrief_app_state_t *state, const char *json);
 
 #ifdef __cplusplus

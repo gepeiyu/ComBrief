@@ -91,11 +91,14 @@ describe('HaaS ComBrief Remote Task 10 firmware modules', () => {
       'COMBRIEF_BLE_SERVICE_UUID',
       'COMBRIEF_BLE_HOST_TX_UUID',
       'COMBRIEF_BLE_DEVICE_TX_UUID',
+      'COMBRIEF_BLE_CONTROL_UUID',
       'combrief_protocol_build_hello',
       'combrief_ble_send_json',
       'combrief_protocol_apply_host_message',
+      'combrief_protocol_build_host_ack',
       'ble_service_start',
       'ble_service_handle_host_write',
+      'ble_service_handle_fast_status_write',
       'ble_service_on_connected',
       'ble_service_on_disconnected',
     ]) {
@@ -105,6 +108,7 @@ describe('HaaS ComBrief Remote Task 10 firmware modules', () => {
     expect(header).toContain('#define COMBRIEF_BLE_SERVICE_UUID "7b5c0001-8d4a-4c3a-9b4f-434252465001"');
     expect(header).toContain('#define COMBRIEF_BLE_HOST_TX_UUID "7b5c0002-8d4a-4c3a-9b4f-434252465001"');
     expect(header).toContain('#define COMBRIEF_BLE_DEVICE_TX_UUID "7b5c0003-8d4a-4c3a-9b4f-434252465001"');
+    expect(header).toContain('#define COMBRIEF_BLE_CONTROL_UUID "7b5c0005-8d4a-4c3a-9b4f-434252465001"');
     expect(source).not.toContain('434252465002');
     expect(source).not.toContain('434252465003');
   });
@@ -186,7 +190,9 @@ describe('HaaS ComBrief Remote Task 10 firmware modules', () => {
       'COMBRIEF_REMOTE_WAITING_RESOLVED',
       'connected idle',
       'connected working',
-      'blue breathing',
+      'software breathing',
+      'aos_task_new_ext',
+      'COMBRIEF_SOFTWARE_PWM_PERIOD_MS',
       'priority',
     ]) {
       expect(source).toContain(text);
@@ -268,7 +274,7 @@ int main(void)
 `, ['app_state', 'led']);
 
     expect(output).toContain('LED green: connected idle');
-    expect(output).toContain('LED blue: connected working blue breathing on');
+    expect(output).toContain('LED blue: connected working blue software breathing');
     expect(output).toContain('LED red: COMBRIEF_REMOTE_SHOWING_REQUEST connected working priority');
   });
 
@@ -311,9 +317,9 @@ int main(void)
 
     const ledLines = output.split('\n').filter((line) => line.startsWith('LED '));
     expect(ledLines.slice(-3)).toEqual([
-      'LED blue: connected working blue breathing on',
+      'LED blue: connected working blue software breathing target=10',
       'LED green: connected idle',
-      'LED blue: connected working blue breathing on',
+      'LED blue: connected working blue software breathing target=25',
     ]);
   });
 
@@ -342,7 +348,7 @@ int main(void)
     expect(output).toContain('connected waiting user red breathing on');
   });
 
-  it('pulses the blue working LED instead of keeping it constantly on', () => {
+  it('uses software PWM target steps for the blue working LED', () => {
     const output = compileAndRunFirmwareHarness(String.raw`
 #include <stdio.h>
 
@@ -363,12 +369,18 @@ int main(void)
     led_render();
     led_render();
     led_render();
+    led_render();
+    led_render();
+    led_render();
     return 0;
 }
 `, ['app_state', 'protocol', 'led']);
 
-    expect(output).toContain('LED blue: connected working blue breathing on');
-    expect(output).toContain('LED blue off: connected working blue breathing');
+    expect(output).toContain('LED blue: connected working blue software breathing target=10');
+    expect(output).toContain('LED blue: connected working blue software breathing target=40');
+    expect(output).toContain('LED blue: connected working blue software breathing target=70');
+    expect(output).toContain('LED blue: connected working blue software breathing target=100');
+    expect(output).not.toContain('LED blue off: connected working blue breathing');
   });
 
   it('renders OLED status copy with a board-safe left margin and binds to HaaS SH1106 display API', () => {
@@ -1183,6 +1195,118 @@ int main(void)
     expect(writeBlock).toContain('event_data->offset != 0');
     expect(writeBlock).not.toContain('event_data->flag != 0');
     expect(writeBlock).toContain('flag=%u');
+  });
+
+  it('ACKs host messages after complete BLE host writes are applied', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+
+int main(void)
+{
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    ble_service_on_connected();
+    ble_service_on_notify_enabled(true);
+    printf("MARK before host write\n");
+    (void)ble_service_handle_host_write("{\"protocol\":1,\"type\":\"state\",\"hostMessageId\":\"host-ack-1\",\"primary\":\"working\"}");
+    printf("MARK after host write\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    const beforeHostWrite = output.slice(0, output.indexOf('MARK before host write'));
+    const hostWrite = output.slice(
+      output.indexOf('MARK before host write'),
+      output.indexOf('MARK after host write'),
+    );
+
+    expect(beforeHostWrite.match(/ComBrief BLE notify characteristic=/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(hostWrite.match(/ComBrief BLE notify characteristic=/g)?.length).toBe(1);
+  });
+
+  it('applies fast status writes without waiting for full host JSON', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+
+static int failures = 0;
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+
+    if (!ble_service_handle_fast_status_write("S:3:working:CC")) {
+        printf("FAIL fast working rejected\n");
+        failures++;
+    }
+    check_str("working summary", state->app_summary, "CC [WORK]");
+    check_str("working primary", state->primary_status, "working");
+
+    if (!ble_service_handle_fast_status_write("S:4:waiting_user:CC")) {
+        printf("FAIL fast waiting rejected\n");
+        failures++;
+    }
+    check_str("waiting summary", state->app_summary, "CC [ASK]\nLoading...");
+    check_str("waiting primary", state->primary_status, "waiting_user");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
+  it('keeps fast waiting-user loading visible when an older working state arrives', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+#include "display.h"
+#include "protocol.h"
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    const char *working_state = "{\"protocol\":1,\"type\":\"state\",\"appName\":\"ComBrief\",\"appVersion\":\"0.1.0\",\"apps\":[{\"id\":\"claude-code\",\"label\":\"CC\",\"status\":\"working\"}],\"primary\":\"claude-code\",\"primaryStatus\":\"working\",\"ts\":123}";
+
+    app_state_init();
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    (void)ble_service_handle_fast_status_write("S:4:waiting_user:CC");
+    (void)combrief_protocol_apply_host_message(state, working_state);
+    display_render();
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service', 'display']);
+
+    expect(output).toContain('OLED: Apps - CC [ASK]');
+    expect(output).toContain('Loading...');
+    expect(output).not.toContain('OLED: Apps - CC [WORK]');
   });
 
   it('sends hello only after notifications are enabled and retries until host sync arrives', () => {

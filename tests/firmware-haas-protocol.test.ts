@@ -153,6 +153,18 @@ int main(void)
     check_contains("hello device", payload, "\"deviceName\":\"ComBrief\"");
     check_contains("hello platform", payload, "\"platform\":\"haas-edu-k1\"");
     check_contains("hello fw", payload, "\"fwVersion\":\"0.1.0\"");
+    check_contains("hello host ack capability", payload, "\"hostAck\":true");
+    check_contains("hello unconfirmed write capability", payload, "\"unconfirmedWrites\":true");
+
+    check_bool("host ACK payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "host-1", true, NULL), true);
+    check_contains("ack protocol", payload, "\"protocol\":1");
+    check_contains("ack type", payload, "\"type\":\"ack\"");
+    check_contains("ack id", payload, "\"hostMessageId\":\"host-1\"");
+    check_contains("ack ok", payload, "\"ok\":true");
+    check_bool("host ACK requires id", combrief_protocol_build_host_ack(payload, sizeof(payload), "", true, NULL), false);
+    check_bool("host ACK error payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "host-2", false, "parse failed"), true);
+    check_contains("ack false", payload, "\"ok\":false");
+    check_contains("ack error", payload, "\"error\":\"parse failed\"");
 
     check_bool("decision payload builds", combrief_protocol_build_decision(payload, sizeof(payload), &state), true);
     check_contains("decision protocol", payload, "\"protocol\":1");
@@ -221,6 +233,18 @@ int main(void)
       expect(battery).toContain(text);
     }
 
+    const ack = extractFunction(source, 'combrief_protocol_build_host_ack');
+    for (const text of [
+      '\\"protocol\\":1',
+      '\\"type\\":\\"ack\\"',
+      '\\"hostMessageId\\":\\"%s\\"',
+      '\\"ok\\":true',
+      '\\"ok\\":false',
+      '\\"error\\":\\"%s\\"',
+    ]) {
+      expect(ack).toContain(text);
+    }
+
     const summaryPart = extractFunction(source, 'append_summary_part');
     expect(summaryPart).toContain('\\n');
     expect(summaryPart).toContain('[%s]');
@@ -254,6 +278,7 @@ int main(void)
     const source = expectFile('protocol/protocol.c');
 
     expect(header).toContain('combrief_protocol_apply_host_message');
+    expect(header).toContain('combrief_protocol_build_host_ack');
     expect(source).toContain('has_message_type');
     expect(source).toContain('top_level_string_equals');
     expect(source).toContain('has_protocol_version');

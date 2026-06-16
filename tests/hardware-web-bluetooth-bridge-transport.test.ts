@@ -302,6 +302,18 @@ describe('WebBluetoothBridgeTransport', () => {
     expect(harness.window?.webContents.send).not.toHaveBeenCalled();
   });
 
+  it('sends fast state signals through the bridge window without host ACK tracking', async () => {
+    const harness = createHarness();
+
+    await harness.transport.start();
+    await harness.transport.sendFastState({ seq: 7, label: 'CC', status: 'working' });
+
+    expect(harness.window?.webContents.send).toHaveBeenCalledWith(
+      HARDWARE_BRIDGE_CHANNELS.sendFastState,
+      { seq: 7, label: 'CC', status: 'working' },
+    );
+  });
+
   it('sends host messages through the bridge window after start and errors when unavailable', async () => {
     const harness = createHarness();
     const message = hostMessage();
@@ -311,7 +323,10 @@ describe('WebBluetoothBridgeTransport', () => {
 
     expect(harness.window?.webContents.send).toHaveBeenCalledWith(
       HARDWARE_BRIDGE_CHANNELS.sendHostMessage,
-      expect.objectContaining({ id: expect.any(String), message }),
+      expect.objectContaining({
+        id: expect.any(String),
+        message: expect.objectContaining(message),
+      }),
     );
     const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as { id: string };
     harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
@@ -319,12 +334,47 @@ describe('WebBluetoothBridgeTransport', () => {
       ok: true,
       error: null,
     });
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
+      protocol: 1,
+      type: 'ack',
+      hostMessageId: payload.id,
+      ok: true,
+    });
     await expect(sendPromise).resolves.toBeUndefined();
 
     harness.clearWindow();
     await expect(harness.transport.send(message)).rejects.toThrow(
       'ComBrief Remote bridge is not running',
     );
+  });
+
+  it('adds a host message id and resolves only after the device ACKs the write', async () => {
+    const harness = createHarness();
+    const message = hostMessage();
+
+    await harness.transport.start();
+    const sendPromise = harness.transport.send(message);
+    const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as {
+      id: string;
+      message: HardwareHostMessage & { hostMessageId?: string };
+    };
+
+    expect(payload.message.hostMessageId).toBe(payload.id);
+
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+      id: payload.id,
+      ok: true,
+      error: null,
+    });
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
+      protocol: 1,
+      type: 'ack',
+      hostMessageId: payload.id,
+      ok: true,
+      ts: 1_710_000_000_010,
+    });
+
+    await expect(sendPromise).resolves.toBeUndefined();
   });
 
   it('rejects host sends when the bridge reports a matching write error', async () => {
@@ -363,10 +413,26 @@ describe('WebBluetoothBridgeTransport', () => {
       { id: payload.id, ok: true, error: null },
       foreignSender,
     );
+    harness.emit(
+      HARDWARE_BRIDGE_CHANNELS.deviceMessage,
+      {
+        protocol: 1,
+        type: 'ack',
+        hostMessageId: payload.id,
+        ok: true,
+      },
+      foreignSender,
+    );
     harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
       id: payload.id,
       ok: true,
       error: null,
+    });
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
+      protocol: 1,
+      type: 'ack',
+      hostMessageId: payload.id,
+      ok: true,
     });
 
     await expect(sendPromise).resolves.toBeUndefined();

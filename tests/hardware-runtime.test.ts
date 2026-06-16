@@ -143,6 +143,12 @@ describe('HardwareRuntime', () => {
     await runtime.sendRequest(requestMessage());
     await runtime.sendResolved(resolvedMessage());
 
+    expect(transport.sentFastStates.map((signal) => signal.status)).toEqual([
+      'idle',
+      'waiting_user',
+    ]);
+    expect(transport.sentFastStates[0]).toMatchObject({ label: 'CC', status: 'idle' });
+    expect(transport.sentFastStates[1]).toMatchObject({ label: 'CC', status: 'waiting_user' });
     expect(transport.sentMessages.map((message) => message.type)).toEqual([
       'state',
       'request',

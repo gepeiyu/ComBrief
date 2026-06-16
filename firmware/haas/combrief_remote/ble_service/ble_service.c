@@ -26,6 +26,7 @@ void hci_h4_driver_init(void);
 #define COMBRIEF_SERVICE_UUID_VALUE UUID128_DECLARE(0x01, 0x50, 0x46, 0x52, 0x42, 0x43, 0x4f, 0x9b, 0x3a, 0x4c, 0x4a, 0x8d, 0x01, 0x00, 0x5c, 0x7b)
 #define COMBRIEF_HOST_TX_UUID_VALUE UUID128_DECLARE(0x01, 0x50, 0x46, 0x52, 0x42, 0x43, 0x4f, 0x9b, 0x3a, 0x4c, 0x4a, 0x8d, 0x02, 0x00, 0x5c, 0x7b)
 #define COMBRIEF_DEVICE_TX_UUID_VALUE UUID128_DECLARE(0x01, 0x50, 0x46, 0x52, 0x42, 0x43, 0x4f, 0x9b, 0x3a, 0x4c, 0x4a, 0x8d, 0x03, 0x00, 0x5c, 0x7b)
+#define COMBRIEF_CONTROL_UUID_VALUE UUID128_DECLARE(0x01, 0x50, 0x46, 0x52, 0x42, 0x43, 0x4f, 0x9b, 0x3a, 0x4c, 0x4a, 0x8d, 0x05, 0x00, 0x5c, 0x7b)
 
 enum {
     COMBRIEF_GATT_IDX_SVC,
@@ -34,6 +35,8 @@ enum {
     COMBRIEF_GATT_IDX_DEVICE_TX_CHAR,
     COMBRIEF_GATT_IDX_DEVICE_TX_VAL,
     COMBRIEF_GATT_IDX_DEVICE_TX_CCC,
+    COMBRIEF_GATT_IDX_CONTROL_CHAR,
+    COMBRIEF_GATT_IDX_CONTROL_VAL,
     COMBRIEF_GATT_IDX_MAX,
 };
 
@@ -45,6 +48,8 @@ static gatt_attr_t g_combrief_gatt_attrs[COMBRIEF_GATT_IDX_MAX] = {
     [COMBRIEF_GATT_IDX_DEVICE_TX_CHAR] = GATT_CHAR_DEFINE(COMBRIEF_DEVICE_TX_UUID_VALUE, GATT_CHRC_PROP_NOTIFY | GATT_CHRC_PROP_READ),
     [COMBRIEF_GATT_IDX_DEVICE_TX_VAL] = GATT_CHAR_VAL_DEFINE(COMBRIEF_DEVICE_TX_UUID_VALUE, GATT_PERM_READ),
     [COMBRIEF_GATT_IDX_DEVICE_TX_CCC] = GATT_CHAR_CCC_DEFINE(),
+    [COMBRIEF_GATT_IDX_CONTROL_CHAR] = GATT_CHAR_DEFINE(COMBRIEF_CONTROL_UUID_VALUE, GATT_CHRC_PROP_WRITE_WITHOUT_RESP | GATT_CHRC_PROP_WRITE),
+    [COMBRIEF_GATT_IDX_CONTROL_VAL] = GATT_CHAR_VAL_DEFINE(COMBRIEF_CONTROL_UUID_VALUE, GATT_PERM_WRITE),
 };
 
 static int16_t g_conn_handle = -1;
@@ -57,6 +62,7 @@ static const char *k_combrief_ble_device_name = COMBRIEF_BLE_DEVICE_NAME;
 static const char *k_combrief_ble_service_uuid = COMBRIEF_BLE_SERVICE_UUID;
 static const char *k_combrief_ble_host_tx_uuid = COMBRIEF_BLE_HOST_TX_UUID;
 static const char *k_combrief_ble_device_tx_uuid = COMBRIEF_BLE_DEVICE_TX_UUID;
+static const char *k_combrief_ble_control_uuid = COMBRIEF_BLE_CONTROL_UUID;
 
 static char g_device_name[32] = COMBRIEF_BLE_DEVICE_NAME;
 static char g_service_uuid[40] = COMBRIEF_BLE_SERVICE_UUID;
@@ -75,6 +81,75 @@ static void copy_or_default(char *dest, size_t dest_len, const char *value, cons
     }
 
     (void)snprintf(dest, dest_len, "%s", value != NULL && value[0] != '\0' ? value : fallback);
+}
+
+static bool ble_service_extract_host_message_id(const char *json, char *out, size_t out_len)
+{
+    const char *key;
+    const char *cursor;
+    size_t used = 0;
+
+    if (json == NULL || out == NULL || out_len == 0) {
+        return false;
+    }
+
+    key = strstr(json, "\"hostMessageId\"");
+    if (key == NULL) {
+        out[0] = '\0';
+        return false;
+    }
+
+    cursor = strchr(key, ':');
+    if (cursor == NULL) {
+        out[0] = '\0';
+        return false;
+    }
+    cursor++;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') {
+        cursor++;
+    }
+    if (*cursor != '\"') {
+        out[0] = '\0';
+        return false;
+    }
+    cursor++;
+
+    while (*cursor != '\0' && *cursor != '\"') {
+        if (*cursor == '\\') {
+            cursor++;
+            if (*cursor == '\0') {
+                out[0] = '\0';
+                return false;
+            }
+        }
+        if (used + 1 >= out_len) {
+            out[0] = '\0';
+            return false;
+        }
+        out[used++] = *cursor++;
+    }
+
+    if (*cursor != '\"') {
+        out[0] = '\0';
+        return false;
+    }
+
+    out[used] = '\0';
+    return used > 0;
+}
+
+static bool ble_service_send_host_ack(const char *host_message_id, bool ok, const char *error)
+{
+    char ack[COMBRIEF_BLE_TX_BUFFER_LEN];
+
+    if (host_message_id == NULL || host_message_id[0] == '\0') {
+        return false;
+    }
+    if (!combrief_protocol_build_host_ack(ack, sizeof(ack), host_message_id, ok, error)) {
+        return false;
+    }
+
+    return combrief_ble_send_json(ack);
 }
 
 static bool ble_service_send_hello(void)
@@ -130,6 +205,7 @@ static void handle_gap_connection_change(const evt_data_gap_conn_change_t *event
 static void handle_gatt_write(evt_data_gatt_char_write_t *event_data)
 {
     uint16_t host_value_handle;
+    uint16_t control_value_handle;
     char payload[COMBRIEF_BLE_TX_BUFFER_LEN];
     size_t copy_len;
 
@@ -138,7 +214,9 @@ static void handle_gatt_write(evt_data_gatt_char_write_t *event_data)
     }
 
     host_value_handle = (uint16_t)(g_service_handle + COMBRIEF_GATT_IDX_HOST_TX_VAL);
-    if ((uint16_t)event_data->char_handle != host_value_handle) {
+    control_value_handle = (uint16_t)(g_service_handle + COMBRIEF_GATT_IDX_CONTROL_VAL);
+    if ((uint16_t)event_data->char_handle != host_value_handle &&
+        (uint16_t)event_data->char_handle != control_value_handle) {
         return;
     }
 
@@ -158,6 +236,15 @@ static void handle_gatt_write(evt_data_gatt_char_write_t *event_data)
     payload[copy_len] = '\0';
 
     printf("ComBrief BLE host write length=%u flag=%u\n", (unsigned int)copy_len, (unsigned int)event_data->flag);
+
+    if ((uint16_t)event_data->char_handle == control_value_handle) {
+        if (!ble_service_handle_fast_status_write(payload)) {
+            event_data->len = -ATT_ERR_UNLIKELY;
+            return;
+        }
+        event_data->len = (int32_t)copy_len;
+        return;
+    }
 
     if (!ble_service_handle_host_write(payload)) {
         event_data->len = -ATT_ERR_UNLIKELY;
@@ -380,12 +467,57 @@ bool ble_service_send_json(const char *json)
     return combrief_ble_send_json(json);
 }
 
+bool ble_service_handle_fast_status_write(const char *payload)
+{
+    combrief_app_state_t *state = combrief_app_state_get_mutable();
+    const char *status;
+    const char *label;
+    char status_buf[24];
+    char label_buf[24];
+    size_t status_len;
+
+    if (payload == NULL || state == NULL || strncmp(payload, "S:", 2) != 0) {
+        return false;
+    }
+
+    status = strchr(payload + 2, ':');
+    if (status == NULL) {
+        return false;
+    }
+    status++;
+    label = strchr(status, ':');
+    if (label == NULL) {
+        return false;
+    }
+
+    status_len = (size_t)(label - status);
+    if (status_len == 0 || status_len >= sizeof(status_buf)) {
+        return false;
+    }
+    memcpy(status_buf, status, status_len);
+    status_buf[status_len] = '\0';
+    label++;
+    if (label[0] == '\0') {
+        return false;
+    }
+    (void)snprintf(label_buf, sizeof(label_buf), "%s", label);
+
+    combrief_app_state_apply_fast_status(state, label_buf, status_buf);
+    printf("ComBrief BLE fast status characteristic=%s status=%s label=%s\n",
+        k_combrief_ble_control_uuid,
+        status_buf,
+        label_buf);
+    return true;
+}
+
 bool ble_service_handle_host_write(const char *json)
 {
     combrief_app_state_t *state = combrief_app_state_get_mutable();
     const char *payload = json;
     size_t payload_len;
     bool final_chunk = true;
+    char host_message_id[96];
+    bool has_host_message_id;
 
     if (json == NULL || state == NULL) {
         return false;
@@ -426,10 +558,18 @@ bool ble_service_handle_host_write(const char *json)
     printf("ComBrief BLE host write characteristic=%s length=%u\n",
         k_combrief_ble_host_tx_uuid,
         (unsigned int)payload_len);
+    has_host_message_id = ble_service_extract_host_message_id(payload, host_message_id, sizeof(host_message_id));
     if (!combrief_protocol_apply_host_message(state, payload)) {
+        if (has_host_message_id) {
+            (void)ble_service_send_host_ack(host_message_id, false, "apply failed");
+        }
         g_host_rx_len = 0;
         g_host_rx_buffer[0] = '\0';
         return false;
+    }
+
+    if (has_host_message_id) {
+        (void)ble_service_send_host_ack(host_message_id, true, NULL);
     }
 
     g_awaiting_host_sync = false;

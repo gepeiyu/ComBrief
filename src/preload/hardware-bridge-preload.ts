@@ -5,6 +5,7 @@ const HARDWARE_BRIDGE_CHANNELS = {
   startScan: 'hardwareBridge:startScan',
   connect: 'hardwareBridge:connect',
   disconnect: 'hardwareBridge:disconnect',
+  sendFastState: 'hardwareBridge:sendFastState',
   sendHostMessage: 'hardwareBridge:sendHostMessage',
   hostMessageResult: 'hardwareBridge:hostMessageResult',
   statusChanged: 'hardwareBridge:statusChanged',
@@ -54,6 +55,7 @@ contextBridge.exposeInMainWorld('combriefHardwareBridge', {
   onStartScan: (handler: BridgeHandler) => onBridgeCommand(HARDWARE_BRIDGE_CHANNELS.startScan, handler),
   onConnect: (handler: BridgeHandler) => onBridgeCommand(HARDWARE_BRIDGE_CHANNELS.connect, handler),
   onDisconnect: (handler: BridgeHandler) => onBridgeCommand(HARDWARE_BRIDGE_CHANNELS.disconnect, handler),
+  onSendFastState: (handler: BridgeHandler) => onBridgeObjectCommand(HARDWARE_BRIDGE_CHANNELS.sendFastState, handler),
   onSendHostMessage: (handler: BridgeHandler) => onBridgeObjectCommand(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, handler),
   sendReady: () => {
     ipcRenderer.send(HARDWARE_BRIDGE_CHANNELS.ready);

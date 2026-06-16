@@ -9,6 +9,7 @@ import {
   clampHardwareText,
   isHardwareDecisionMessage,
   isHardwareHelloMessage,
+  isHardwareHostAckMessage,
   isHardwareBatteryMessage,
   hardwareProtocolLimits,
   type HardwareHostMessage,
@@ -106,6 +107,48 @@ describe('hardware protocol', () => {
         type: 'decision',
         decisionId: 'request-1',
         ts: 1710000000000,
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts valid host ACK messages', () => {
+    expect(
+      isHardwareHostAckMessage({
+        protocol: 1,
+        type: 'ack',
+        hostMessageId: 'host-123',
+        ok: true,
+        ts: 1710000000000,
+      }),
+    ).toBe(true);
+    expect(
+      isHardwareHostAckMessage({
+        protocol: 1,
+        type: 'ack',
+        hostMessageId: 'host-123',
+        ok: false,
+        error: 'parse failed',
+        ts: 1710000000000,
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects malformed host ACK messages', () => {
+    expect(isHardwareHostAckMessage({ type: 'ack' })).toBe(false);
+    expect(
+      isHardwareHostAckMessage({
+        protocol: 1,
+        type: 'ack',
+        id: 'host-123',
+        ok: true,
+      }),
+    ).toBe(false);
+    expect(
+      isHardwareHostAckMessage({
+        protocol: 1,
+        type: 'ack',
+        hostMessageId: 'host-123',
+        ok: 'true',
       }),
     ).toBe(false);
   });

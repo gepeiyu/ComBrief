@@ -4,6 +4,7 @@ import {
   isHardwareHelloMessage,
   type HardwareDecisionMessage,
   type HardwareDeviceMessage,
+  type HardwareFastStateSignal,
   type HardwareHostMessage,
   type HardwareResolvedMessage,
   type HardwareRequestMessage,
@@ -24,6 +25,7 @@ export interface HardwareRuntimeStatus extends HardwareConnectionStatus {
 }
 
 export class HardwareRuntime {
+  private fastStateSeq = 0;
   private offMessage: (() => void) | null = null;
   private device = {
     deviceName: null as string | null,
@@ -71,10 +73,16 @@ export class HardwareRuntime {
   }
 
   sendState(message: HardwareStateMessage): Promise<void> {
+    void this.sendFastStateBestEffort(this.fastStateFromState(message));
     return this.send(message);
   }
 
   sendRequest(message: HardwareRequestMessage): Promise<void> {
+    void this.sendFastStateBestEffort({
+      seq: this.nextFastStateSeq(),
+      label: message.sourceLabel,
+      status: 'waiting_user',
+    });
     return this.send(message);
   }
 
@@ -82,14 +90,34 @@ export class HardwareRuntime {
     return this.send(message);
   }
 
+  private async sendFastStateBestEffort(signal: HardwareFastStateSignal): Promise<void> {
+    try {
+      await this.sendFastState(signal);
+    } catch {
+      // Fast state is only a low-latency hint; the reliable host message below is authoritative.
+    }
+  }
+
+  private async sendFastState(signal: HardwareFastStateSignal): Promise<void> {
+    await this.transport.sendFastState(signal);
+  }
+
+  private fastStateFromState(message: HardwareStateMessage): HardwareFastStateSignal {
+    const primary = message.apps?.find((app) => app.id === message.primary) ?? message.apps?.[0];
+    const summaryLine = message.appSummary?.split('\n').find((line) => line.trim().length > 0);
+    return {
+      seq: this.nextFastStateSeq(),
+      label: primary?.label ?? summaryLine?.split(' ')[0] ?? 'CB',
+      status: message.primaryStatus ?? primary?.status ?? 'idle',
+    };
+  }
+
+  private nextFastStateSeq(): number {
+    this.fastStateSeq = (this.fastStateSeq % 999_999) + 1;
+    return this.fastStateSeq;
+  }
+
   private async send(message: HardwareHostMessage): Promise<void> {
-    const status = this.transport.getStatus();
-    if (!status.started) {
-      throw new Error('ComBrief Remote bridge is not started');
-    }
-    if (!status.connected) {
-      throw new Error('ComBrief Remote is not connected');
-    }
     await this.transport.send(message);
   }
 

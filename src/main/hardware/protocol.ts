@@ -33,6 +33,12 @@ export interface HardwareOption {
   label: string;
 }
 
+export interface HardwareFastStateSignal {
+  seq: number;
+  label: string;
+  status: HardwareStatus;
+}
+
 export interface HardwareHelloMessage {
   protocol: typeof HARDWARE_PROTOCOL_VERSION;
   type: 'hello';
@@ -44,6 +50,8 @@ export interface HardwareHelloMessage {
     display?: string;
     keys?: string[];
     briefFullToggle?: boolean;
+    hostAck?: boolean;
+    unconfirmedWrites?: boolean;
     maxOptions?: number;
     maxBriefLen?: number;
     maxContentLen?: number;
@@ -60,6 +68,7 @@ export interface HardwareBatteryMessage {
 export interface HardwareStateMessage {
   protocol: typeof HARDWARE_PROTOCOL_VERSION;
   type: 'state';
+  hostMessageId?: string;
   appName?: 'ComBrief';
   appVersion?: string;
   apps?: Array<{
@@ -76,6 +85,7 @@ export interface HardwareStateMessage {
 export interface HardwareRequestMessage {
   protocol: typeof HARDWARE_PROTOCOL_VERSION;
   type: 'request';
+  hostMessageId?: string;
   appName: 'ComBrief';
   appVersion: string;
   decisionId: string;
@@ -97,6 +107,15 @@ export interface HardwareDecisionMessage {
   ts: number;
 }
 
+export interface HardwareHostAckMessage {
+  protocol: typeof HARDWARE_PROTOCOL_VERSION;
+  type: 'ack';
+  hostMessageId: string;
+  ok: boolean;
+  error?: string;
+  ts?: number;
+}
+
 export type HardwareResolvedResult =
   | 'approved'
   | 'denied'
@@ -108,6 +127,7 @@ export type HardwareResolvedResult =
 export interface HardwareResolvedMessage {
   protocol: typeof HARDWARE_PROTOCOL_VERSION;
   type: 'resolved';
+  hostMessageId?: string;
   decisionId: string;
   result: HardwareResolvedResult;
   message: string;
@@ -120,6 +140,7 @@ export type HardwareHostMessage =
 
 export type HardwareDeviceMessage =
   | HardwareHelloMessage
+  | HardwareHostAckMessage
   | HardwareDecisionMessage
   | HardwareBatteryMessage;
 
@@ -133,6 +154,24 @@ export function clampHardwareText(value: string, maxBytes: number): string {
     used += bytes;
   }
   return result;
+}
+
+export function isHardwareFastStateSignal(
+  value: unknown,
+): value is HardwareFastStateSignal {
+  if (!value || typeof value !== 'object') return false;
+
+  const signal = value as Record<string, unknown>;
+  return (
+    typeof signal.seq === 'number' &&
+    Number.isFinite(signal.seq) &&
+    typeof signal.label === 'string' &&
+    signal.label.length > 0 &&
+    (signal.status === 'offline' ||
+      signal.status === 'idle' ||
+      signal.status === 'working' ||
+      signal.status === 'waiting_user')
+  );
 }
 
 export function isHardwareHelloMessage(
@@ -166,6 +205,23 @@ export function isHardwareBatteryMessage(
     msg.type === 'battery' &&
     typeof msg.battery === 'number' &&
     Number.isFinite(msg.battery)
+  );
+}
+
+export function isHardwareHostAckMessage(
+  value: unknown,
+): value is HardwareHostAckMessage {
+  if (!value || typeof value !== 'object') return false;
+
+  const msg = value as Record<string, unknown>;
+  return (
+    msg.protocol === HARDWARE_PROTOCOL_VERSION &&
+    msg.type === 'ack' &&
+    typeof msg.hostMessageId === 'string' &&
+    msg.hostMessageId.length > 0 &&
+    typeof msg.ok === 'boolean' &&
+    (msg.error === undefined || typeof msg.error === 'string') &&
+    (msg.ts === undefined || (typeof msg.ts === 'number' && Number.isFinite(msg.ts)))
   );
 }
 
