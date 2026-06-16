@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import {
   HARDWARE_BRIDGE_CHANNELS,
+  isHardwareBridgeHostMessageResult,
   isHardwareBridgeStatus,
 } from './bridge-ipc';
 import type {
@@ -15,7 +16,21 @@ import {
 import type { HardwareConnectionStatus, HardwareTransport } from './transport';
 import type { WebBluetoothBridgeWindowManager } from './web-bluetooth-bridge-window';
 
+const HOST_MESSAGE_ACK_BASE_MS = 2_000;
+const HOST_MESSAGE_ACK_PER_CHUNK_MS = 250;
+const BLE_CHUNK_PAYLOAD_BYTES = 19;
+
+function hostMessageAckTimeoutMs(message: HardwareHostMessage): number {
+  const bytes = Buffer.byteLength(JSON.stringify(message), 'utf8');
+  const chunks = Math.max(1, Math.ceil(bytes / BLE_CHUNK_PAYLOAD_BYTES));
+  return HOST_MESSAGE_ACK_BASE_MS + chunks * HOST_MESSAGE_ACK_PER_CHUNK_MS;
+}
+
 type BridgeIpcListener = (event: Electron.IpcMainEvent, payload: unknown) => void;
+
+export interface WebBluetoothBridgeTransportCallbacks {
+  onConnected?: () => void;
+}
 
 export class WebBluetoothBridgeTransport implements HardwareTransport {
   private status: HardwareConnectionStatus = {
@@ -25,6 +40,10 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
   };
 
   private readonly messageHandlers = new Set<(message: HardwareDeviceMessage) => void>();
+  private readonly pendingHostMessages = new Map<
+    string,
+    { resolve: () => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }
+  >();
   private subscribed = false;
   private startGeneration = 0;
 
@@ -33,11 +52,15 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
       return;
     }
 
+    const wasConnected = this.status.connected;
     this.status = {
       started: payload.started,
       connected: payload.connected,
       lastError: payload.lastError,
     };
+    if (!wasConnected && payload.connected) {
+      this.callbacks.onConnected?.();
+    }
   };
 
   private readonly deviceMessageListener: BridgeIpcListener = (event, payload) => {
@@ -48,6 +71,28 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     for (const handler of this.messageHandlers) {
       handler(payload);
     }
+  };
+
+  private readonly hostMessageResultListener: BridgeIpcListener = (event, payload) => {
+    if (!this.isBridgeSender(event) || !isHardwareBridgeHostMessageResult(payload)) {
+      return;
+    }
+
+    const pending = this.pendingHostMessages.get(payload.id);
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+    this.pendingHostMessages.delete(payload.id);
+    if (payload.ok) {
+      pending.resolve();
+      return;
+    }
+
+    const message = payload.error || 'ComBrief Remote host message write failed';
+    this.status = { ...this.status, lastError: message };
+    pending.reject(new Error(message));
   };
 
   private readonly errorListener: BridgeIpcListener = (event, payload) => {
@@ -64,6 +109,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
   constructor(
     private readonly manager: WebBluetoothBridgeWindowManager,
     private readonly bridgeIpcMain: Pick<Electron.IpcMain, 'on' | 'off'> = ipcMain,
+    private readonly callbacks: WebBluetoothBridgeTransportCallbacks = {},
   ) {}
 
   async start(): Promise<void> {
@@ -95,9 +141,9 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     };
   }
 
-  async openPairing(): Promise<void> {
+  async openPairing(options?: { autoConnect?: boolean }): Promise<void> {
     try {
-      await this.manager.showPairingWindow();
+      await this.manager.showPairingWindow(options);
     } catch (error) {
       this.status = {
         ...this.status,
@@ -115,11 +161,13 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     }
 
     this.unsubscribeBridgeEvents();
+    this.clearPendingHostMessages('ComBrief Remote bridge stopped');
     this.status = { started: false, connected: false, lastError: null };
     this.manager.destroy();
   }
 
   getStatus(): HardwareConnectionStatus {
+    this.refreshWindowStatus();
     return { ...this.status };
   }
 
@@ -130,10 +178,26 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 
     const bridgeWindow = this.manager.getWindow();
     if (!bridgeWindow) {
+      this.markBridgeWindowClosed();
       throw new Error('ComBrief Remote bridge is not running');
     }
 
-    bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, message);
+    const id = `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const result = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingHostMessages.delete(id);
+        const error = new Error('ComBrief Remote bridge did not confirm host message write');
+        this.status = { ...this.status, lastError: error.message };
+        reject(error);
+      }, hostMessageAckTimeoutMs(message));
+      this.pendingHostMessages.set(id, { resolve, reject, timeout });
+    });
+
+    bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, {
+      id,
+      message,
+    });
+    return result;
   }
 
   onMessage(handler: (message: HardwareDeviceMessage) => void): () => void {
@@ -147,6 +211,29 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     return event.sender === this.manager.getWindow()?.webContents;
   }
 
+  private refreshWindowStatus(): void {
+    if (this.status.started && !this.manager.getWindow()) {
+      this.markBridgeWindowClosed();
+    }
+  }
+
+  private markBridgeWindowClosed(): void {
+    this.status = {
+      started: false,
+      connected: false,
+      lastError: 'ComBrief Remote bridge window closed',
+    };
+    this.clearPendingHostMessages('ComBrief Remote bridge window closed');
+  }
+
+  private clearPendingHostMessages(reason: string): void {
+    for (const [id, pending] of this.pendingHostMessages) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(reason));
+      this.pendingHostMessages.delete(id);
+    }
+  }
+
   private subscribeBridgeEvents(): void {
     if (this.subscribed) {
       return;
@@ -154,6 +241,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 
     this.bridgeIpcMain.on(HARDWARE_BRIDGE_CHANNELS.statusChanged, this.statusChangedListener);
     this.bridgeIpcMain.on(HARDWARE_BRIDGE_CHANNELS.deviceMessage, this.deviceMessageListener);
+    this.bridgeIpcMain.on(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, this.hostMessageResultListener);
     this.bridgeIpcMain.on(HARDWARE_BRIDGE_CHANNELS.error, this.errorListener);
     this.subscribed = true;
   }
@@ -165,6 +253,7 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 
     this.bridgeIpcMain.off(HARDWARE_BRIDGE_CHANNELS.statusChanged, this.statusChangedListener);
     this.bridgeIpcMain.off(HARDWARE_BRIDGE_CHANNELS.deviceMessage, this.deviceMessageListener);
+    this.bridgeIpcMain.off(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, this.hostMessageResultListener);
     this.bridgeIpcMain.off(HARDWARE_BRIDGE_CHANNELS.error, this.errorListener);
     this.subscribed = false;
   }

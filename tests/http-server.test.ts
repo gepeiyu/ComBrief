@@ -91,4 +91,41 @@ describe('http-server', () => {
     expect(onState).toHaveBeenCalledOnce();
     server.close();
   });
+
+  it('notifies when local terminal resolves a decision', async () => {
+    const onLocalDecisionResolved = vi.fn();
+    const decisionService = {
+      resolveLocalTerminal: vi.fn(() => true),
+    };
+    const server = createCombriefServer({
+      token: 'secret',
+      registeredApps: new Set(['claude-code']),
+      onState: vi.fn(),
+      getDecisionService: () => decisionService as never,
+      onLocalDecisionResolved,
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+
+    const res = await request(
+      server,
+      'POST',
+      '/v1/decision/local-resolved',
+      {
+        appId: 'claude-code',
+        sessionId: 'sess-local',
+        toolName: 'Bash',
+        kind: 'allow',
+      },
+      'secret',
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true });
+    expect(onLocalDecisionResolved).toHaveBeenCalledWith({
+      appId: 'claude-code',
+      sessionId: 'sess-local',
+      toolName: 'Bash',
+    });
+    server.close();
+  });
 });

@@ -112,6 +112,40 @@ export interface InstallResult {
   bridgePath: string;
 }
 
+export function refreshRegisteredAppScripts(appIds: readonly string[]): void {
+  for (const appId of appIds) {
+    copyBridgeFiles(appId, appInstallDir(appId));
+    refreshRegisteredAppHooks(appId);
+  }
+}
+
+function refreshRegisteredAppHooks(appId: string): void {
+  const app = getAppDefinition(appId);
+  const configPath = expandHomePath(app.hooksConfigRelPath);
+  if (!existsSync(configPath)) return;
+
+  const bridgePath = bridgeScriptPath(appId);
+  if (app.kind === 'cursor-hooks-json') {
+    const current = readJsonFile(configPath, emptyCursorHooks());
+    writeJsonFile(configPath, injectCursorBridge(current, bridgePath, appId));
+    return;
+  }
+
+  const current = readJsonFile<ClaudeSettingsFile>(
+    configPath,
+    emptyClaudeSettings(),
+  );
+  const gatePath = remoteGateScriptPath(appId);
+  const chainCommands = collectClaudeChainCommands(current, bridgePath, gatePath);
+  let next = injectClaudeBridge(current, bridgePath, appId);
+  next = injectRemoteGate(next, gatePath);
+  writeJsonFile(configPath, next);
+  writeFileSync(
+    join(appInstallDir(appId), 'chain.json'),
+    JSON.stringify({ commands: chainCommands }, null, 2),
+  );
+}
+
 export function installApp(appId: string): InstallResult {
   const app = getAppDefinition(appId);
   const home = combriefHome();

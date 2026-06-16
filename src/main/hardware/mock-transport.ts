@@ -18,6 +18,10 @@ export class MockHardwareTransport implements HardwareTransport {
     this.status = { started: true, connected: true, lastError: null };
   }
 
+  setConnected(connected: boolean): void {
+    this.status = { ...this.status, connected };
+  }
+
   async stop(): Promise<void> {
     this.status = { started: false, connected: false, lastError: null };
   }

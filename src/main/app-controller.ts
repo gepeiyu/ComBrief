@@ -25,6 +25,7 @@ import type { TrayManager } from './tray-manager';
 import {
   HARDWARE_PROTOCOL_VERSION,
   type HardwareStateMessage,
+  type HardwareStatus,
 } from './hardware/protocol';
 
 export class AppController {
@@ -97,8 +98,9 @@ export class AppController {
     );
   }
 
-  tickTimeouts(): void {
+  tickTimeouts(): boolean {
     const now = Date.now();
+    let changed = false;
     for (const [appId, state] of this.apps) {
       let next = applyHeartbeatTimeout(
         state,
@@ -112,6 +114,7 @@ export class AppController {
       );
 
       if (next.status !== state.status) {
+        changed = true;
         this.apps.set(appId, next);
 
         if (
@@ -130,6 +133,8 @@ export class AppController {
         );
       }
     }
+
+    return changed;
   }
 
   async install(appId: string): Promise<void> {
@@ -184,26 +189,51 @@ export class AppController {
     }
   }
 
-  getHardwareStateSnapshot(appVersion: string): HardwareStateMessage {
+  clearPendingApproval(appId: string): boolean {
+    const state = this.apps.get(appId);
+    if (!state) return false;
+    if (state.pendingApprovalSince === null && state.status !== 'waiting_user') return false;
+
+    const next: AppState = {
+      ...state,
+      status: state.status === 'waiting_user' ? 'working' : state.status,
+      pendingApprovalSince: null,
+    };
+    this.apps.set(appId, next);
+    if (next.status !== state.status) {
+      this.trayManager.setStatus(appId, next.status, this.trayCallbacks(appId));
+    }
+    return true;
+  }
+
+  getHardwareStateSnapshot(_appVersion: string): HardwareStateMessage {
     const apps = [...this.apps.entries()].map(([id, state]) => ({
       id,
       label: resolveTrayAbbrev(id, this.cfg) || getAppDefinition(id).trayAbbrev,
       status: state.status,
     }));
-    const primary =
-      apps.find((item) => item.status === 'waiting_user')?.id ??
-      apps.find((item) => item.status === 'working')?.id ??
-      apps[0]?.id;
+    const primaryApp =
+      apps.find((item) => item.status === 'waiting_user') ??
+      apps.find((item) => item.status === 'working') ??
+      apps[0];
 
     return {
       protocol: HARDWARE_PROTOCOL_VERSION,
       type: 'state',
-      appName: 'ComBrief',
-      appVersion,
-      apps,
-      primary,
-      ts: Date.now(),
+      appSummary: apps
+        .slice(0, 2)
+        .map((item) => `${item.label} [${this.hardwareStatusLabel(item.status)}]`)
+        .join('\n'),
+      primary: primaryApp?.id,
+      primaryStatus: primaryApp?.status ?? 'idle',
     };
+  }
+
+  private hardwareStatusLabel(status: HardwareStatus): string {
+    if (status === 'idle') return 'OK';
+    if (status === 'working') return 'WORK';
+    if (status === 'waiting_user') return 'ASK';
+    return 'OFF';
   }
 
   private trayCallbacks(appId: string) {

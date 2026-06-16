@@ -30,6 +30,28 @@ function hardwareDecision(optionId: string): HardwareDecisionMessage {
 }
 
 describe('hardware decision mapper', () => {
+  it('maps allowAlways suggestions to allowAlways actions', () => {
+    const pending = pendingDecision('Bash', { command: 'gh pr create' });
+    pending.body.raw = {
+      permission_suggestions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'gh pr *' }],
+        },
+      ],
+    };
+
+    expect(
+      mapHardwareDecisionToAction(hardwareDecision('allowAlways:0'), pending),
+    ).toEqual({
+      kind: 'allowAlways',
+      suggestion: {
+        type: 'addRules',
+        rules: [{ toolName: 'Bash', ruleContent: 'gh pr *' }],
+      },
+    });
+  });
+
   it('maps allow to allowOnce', () => {
     expect(
       mapHardwareDecisionToAction(hardwareDecision('allow'), pendingDecision()),

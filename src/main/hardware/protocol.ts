@@ -1,5 +1,5 @@
 export const HARDWARE_PROTOCOL_VERSION = 1 as const;
-export const COMBRIEF_REMOTE_NAME = 'ComBrief-Remote' as const;
+export const COMBRIEF_REMOTE_NAME = 'ComBrief' as const;
 
 export const COMBRIEF_REMOTE_SERVICE_UUID =
   '7b5c0001-8d4a-4c3a-9b4f-434252465001' as const;
@@ -13,10 +13,10 @@ export const COMBRIEF_REMOTE_CONTROL_UUID =
   '7b5c0005-8d4a-4c3a-9b4f-434252465001' as const;
 
 export const hardwareProtocolLimits = {
-  maxBriefLen: 64,
-  maxContentLen: 1024,
-  maxOptions: 8,
-  maxOptionLabelLen: 24,
+  maxBriefLen: 48,
+  maxContentLen: 80,
+  maxOptions: 3,
+  maxOptionLabelLen: 12,
 } as const;
 
 export type HardwareStatus = 'offline' | 'idle' | 'working' | 'waiting_user';
@@ -60,15 +60,17 @@ export interface HardwareBatteryMessage {
 export interface HardwareStateMessage {
   protocol: typeof HARDWARE_PROTOCOL_VERSION;
   type: 'state';
-  appName: 'ComBrief';
-  appVersion: string;
-  apps: Array<{
+  appName?: 'ComBrief';
+  appVersion?: string;
+  apps?: Array<{
     id: string;
     label: string;
     status: HardwareStatus;
   }>;
+  appSummary?: string;
   primary?: string;
-  ts: number;
+  primaryStatus?: HardwareStatus;
+  ts?: number;
 }
 
 export interface HardwareRequestMessage {
@@ -121,8 +123,16 @@ export type HardwareDeviceMessage =
   | HardwareDecisionMessage
   | HardwareBatteryMessage;
 
-export function clampHardwareText(value: string, maxLen: number): string {
-  return value.length > maxLen ? value.slice(0, maxLen) : value;
+export function clampHardwareText(value: string, maxBytes: number): string {
+  let used = 0;
+  let result = '';
+  for (const char of value) {
+    const bytes = Buffer.byteLength(char, 'utf8');
+    if (used + bytes > maxBytes) break;
+    result += char;
+    used += bytes;
+  }
+  return result;
 }
 
 export function isHardwareHelloMessage(

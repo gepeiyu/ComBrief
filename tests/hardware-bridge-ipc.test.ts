@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HARDWARE_BRIDGE_CHANNELS,
+  isHardwareBridgeHostMessageResult,
   isHardwareBridgeStatus,
   type HardwareBridgeStatus,
 } from '../src/main/hardware/bridge-ipc';
@@ -13,6 +14,7 @@ describe('hardware bridge IPC contract', () => {
       connect: 'hardwareBridge:connect',
       disconnect: 'hardwareBridge:disconnect',
       sendHostMessage: 'hardwareBridge:sendHostMessage',
+      hostMessageResult: 'hardwareBridge:hostMessageResult',
       getStatus: 'hardwareBridge:getStatus',
       statusChanged: 'hardwareBridge:statusChanged',
       deviceMessage: 'hardwareBridge:deviceMessage',
@@ -25,7 +27,7 @@ describe('hardware bridge IPC contract', () => {
       started: true,
       connected: false,
       scanning: true,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       lastError: null,
     };
 
@@ -79,6 +81,22 @@ describe('hardware bridge IPC contract', () => {
         deviceName: null,
         lastError: false,
       }),
+    ).toBe(false);
+  });
+
+  it('accepts only valid host message write results', () => {
+    expect(
+      isHardwareBridgeHostMessageResult({ id: 'host-1', ok: true, error: null }),
+    ).toBe(true);
+    expect(
+      isHardwareBridgeHostMessageResult({ id: 'host-1', ok: false, error: 'GATT failed' }),
+    ).toBe(true);
+    expect(isHardwareBridgeHostMessageResult({ id: 'host-1', ok: true })).toBe(false);
+    expect(
+      isHardwareBridgeHostMessageResult({ id: 'host-1', ok: 'true', error: null }),
+    ).toBe(false);
+    expect(
+      isHardwareBridgeHostMessageResult({ id: 1, ok: true, error: null }),
     ).toBe(false);
   });
 });

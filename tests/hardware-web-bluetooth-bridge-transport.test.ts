@@ -60,7 +60,7 @@ function createBridgeWindow(): MockBridgeWindow {
 
 function createHarness(
   initialWindow: MockBridgeWindow | null = createBridgeWindow(),
-  options: { deferReady?: boolean; readyError?: Error; pairingError?: Error } = {},
+  options: { deferReady?: boolean; readyError?: Error; pairingError?: Error; onConnected?: () => void } = {},
 ) {
   let bridgeWindow = initialWindow;
   let resolveReady: ((window: MockBridgeWindow) => void) | null = null;
@@ -97,7 +97,11 @@ function createHarness(
     }),
     destroy: vi.fn(),
   };
-  const transport = new WebBluetoothBridgeTransport(manager);
+  const transport = new WebBluetoothBridgeTransport(
+    manager,
+    electronMock.ipcMain,
+    options.onConnected ? { onConnected: options.onConnected } : undefined,
+  );
 
   return {
     transport,
@@ -161,7 +165,7 @@ describe('WebBluetoothBridgeTransport', () => {
       started: true,
       connected: true,
       scanning: false,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       lastError: 'old error',
     });
     await harness.transport.start();
@@ -209,6 +213,7 @@ describe('WebBluetoothBridgeTransport', () => {
     await harness.transport.openPairing();
 
     expect(harness.manager.showPairingWindow).toHaveBeenCalledOnce();
+    expect(harness.manager.showPairingWindow).toHaveBeenCalledWith(undefined);
     expect(harness.window?.webContents.send).not.toHaveBeenCalledWith(
       HARDWARE_BRIDGE_CHANNELS.startScan,
     );
@@ -220,6 +225,16 @@ describe('WebBluetoothBridgeTransport', () => {
       connected: false,
       lastError: null,
     });
+  });
+
+  it('passes auto connect pairing options to the bridge window manager', async () => {
+    const harness = createHarness();
+
+    await harness.transport.start();
+    await harness.transport.openPairing({ autoConnect: true });
+
+    expect(harness.manager.showPairingWindow).toHaveBeenCalledOnce();
+    expect(harness.manager.showPairingWindow).toHaveBeenCalledWith({ autoConnect: true });
   });
 
   it('rejects pairing window failures after recording the last error', async () => {
@@ -292,16 +307,92 @@ describe('WebBluetoothBridgeTransport', () => {
     const message = hostMessage();
 
     await harness.transport.start();
-    await harness.transport.send(message);
+    const sendPromise = harness.transport.send(message);
 
     expect(harness.window?.webContents.send).toHaveBeenCalledWith(
       HARDWARE_BRIDGE_CHANNELS.sendHostMessage,
-      message,
+      expect.objectContaining({ id: expect.any(String), message }),
     );
+    const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as { id: string };
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+      id: payload.id,
+      ok: true,
+      error: null,
+    });
+    await expect(sendPromise).resolves.toBeUndefined();
 
     harness.clearWindow();
     await expect(harness.transport.send(message)).rejects.toThrow(
       'ComBrief Remote bridge is not running',
+    );
+  });
+
+  it('rejects host sends when the bridge reports a matching write error', async () => {
+    const harness = createHarness();
+    const message = hostMessage();
+
+    await harness.transport.start();
+    const sendPromise = harness.transport.send(message);
+    const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as { id: string };
+
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+      id: payload.id,
+      ok: false,
+      error: 'GATT write failed',
+    });
+
+    await expect(sendPromise).rejects.toThrow('GATT write failed');
+    expect(harness.transport.getStatus()).toEqual({
+      started: true,
+      connected: false,
+      lastError: 'GATT write failed',
+    });
+  });
+
+  it('ignores host message results from non-bridge senders', async () => {
+    const harness = createHarness();
+    const message = hostMessage();
+    const foreignSender = { send: vi.fn() };
+
+    await harness.transport.start();
+    const sendPromise = harness.transport.send(message);
+    const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as { id: string };
+
+    harness.emit(
+      HARDWARE_BRIDGE_CHANNELS.hostMessageResult,
+      { id: payload.id, ok: true, error: null },
+      foreignSender,
+    );
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+      id: payload.id,
+      ok: true,
+      error: null,
+    });
+
+    await expect(sendPromise).resolves.toBeUndefined();
+  });
+
+  it('marks the bridge stopped when the window disappears before status or send', async () => {
+    const harness = createHarness();
+
+    await harness.transport.start();
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.statusChanged, {
+      started: true,
+      connected: true,
+      scanning: false,
+      deviceName: 'ComBrief',
+      lastError: null,
+    });
+
+    harness.clearWindow();
+
+    expect(harness.transport.getStatus()).toEqual({
+      started: false,
+      connected: false,
+      lastError: 'ComBrief Remote bridge window closed',
+    });
+    await expect(harness.transport.send(hostMessage())).rejects.toThrow(
+      'ComBrief Remote bridge is not started',
     );
   });
 
@@ -314,7 +405,7 @@ describe('WebBluetoothBridgeTransport', () => {
     harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
       protocol: 1,
       type: 'hello',
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 88,
@@ -361,6 +452,36 @@ describe('WebBluetoothBridgeTransport', () => {
     expect(handler).toHaveBeenCalledTimes(3);
   });
 
+  it('notifies once when the bridge status first becomes connected', async () => {
+    const onConnected = vi.fn();
+    const harness = createHarness(createBridgeWindow(), { onConnected });
+
+    await harness.transport.start();
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.statusChanged, {
+      started: true,
+      connected: false,
+      scanning: true,
+      deviceName: null,
+      lastError: null,
+    });
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.statusChanged, {
+      started: true,
+      connected: true,
+      scanning: false,
+      deviceName: 'ComBrief',
+      lastError: null,
+    });
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.statusChanged, {
+      started: true,
+      connected: true,
+      scanning: false,
+      deviceName: 'ComBrief',
+      lastError: null,
+    });
+
+    expect(onConnected).toHaveBeenCalledOnce();
+  });
+
   it('maps valid status changes and bridge errors into transport status', async () => {
     const harness = createHarness();
 
@@ -369,7 +490,7 @@ describe('WebBluetoothBridgeTransport', () => {
       started: true,
       connected: true,
       scanning: false,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       lastError: 'connect warning',
     });
 
@@ -422,7 +543,7 @@ describe('WebBluetoothBridgeTransport', () => {
         started: true,
         connected: true,
         scanning: false,
-        deviceName: 'ComBrief-Remote',
+        deviceName: 'ComBrief',
         lastError: 'spoofed status',
       },
       foreignSender,

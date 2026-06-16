@@ -83,7 +83,13 @@ export class HardwareRuntime {
   }
 
   private async send(message: HardwareHostMessage): Promise<void> {
-    if (!this.transport.getStatus().started) return;
+    const status = this.transport.getStatus();
+    if (!status.started) {
+      throw new Error('ComBrief Remote bridge is not started');
+    }
+    if (!status.connected) {
+      throw new Error('ComBrief Remote is not connected');
+    }
     await this.transport.send(message);
   }
 

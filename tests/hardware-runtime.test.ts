@@ -64,7 +64,7 @@ describe('HardwareRuntime', () => {
     transport.emitDeviceMessage({
       protocol: 1,
       type: 'hello',
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 80,
@@ -74,7 +74,7 @@ describe('HardwareRuntime', () => {
       started: true,
       connected: true,
       lastError: null,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 80,
@@ -94,7 +94,7 @@ describe('HardwareRuntime', () => {
     transport.emitDeviceMessage({
       protocol: 1,
       type: 'hello',
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 80,
@@ -103,7 +103,7 @@ describe('HardwareRuntime', () => {
     expect(onHello).toHaveBeenCalledOnce();
     expect(runtime.getStatus()).toMatchObject({
       connected: true,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 80,
@@ -119,7 +119,7 @@ describe('HardwareRuntime', () => {
     transport.emitDeviceMessage({
       protocol: 2,
       type: 'hello',
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       platform: 'haas-edu-k1',
       fwVersion: '0.1.0',
       battery: 80,
@@ -174,12 +174,13 @@ describe('HardwareRuntime', () => {
     });
   });
 
-  it('silently skips sending before start', async () => {
+  it('rejects host messages before start', async () => {
     const transport = new MockHardwareTransport();
     const runtime = new HardwareRuntime(transport);
 
-    await runtime.sendState(stateMessage());
-
+    await expect(runtime.sendState(stateMessage())).rejects.toThrow(
+      'ComBrief Remote bridge is not started',
+    );
     expect(transport.sentMessages).toEqual([]);
   });
 
@@ -255,6 +256,18 @@ describe('HardwareRuntime', () => {
 
     expect(onDecision).not.toHaveBeenCalled();
     expect(runtime.getStatus()).toMatchObject({ started: false, connected: false });
+  });
+
+  it('rejects host messages when bridge is started but not connected', async () => {
+    const transport = new MockHardwareTransport();
+    await transport.start();
+    transport.setConnected(false);
+    const runtime = new HardwareRuntime(transport);
+
+    await expect(runtime.sendRequest(requestMessage())).rejects.toThrow(
+      'ComBrief Remote is not connected',
+    );
+    expect(transport.sentMessages).toHaveLength(0);
   });
 
   it('does not duplicate decision handlers after restart', async () => {

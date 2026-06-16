@@ -1,9 +1,21 @@
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, app, ipcMain } from 'electron';
 import { HARDWARE_BRIDGE_CHANNELS } from './bridge-ipc';
+
+export interface WebBluetoothBridgeWindowMessages {
+  title: string;
+  description: string;
+  button: string;
+  initialStatus: string;
+  scanningStatus: string;
+  connectingStatus: string;
+  connectedStatus: string;
+  errorPrefix: string;
+}
 
 export interface WebBluetoothBridgeWindowManagerOptions {
   rendererPath: string;
   preloadPath: string;
+  messages?: WebBluetoothBridgeWindowMessages;
 }
 
 type BluetoothDevice = {
@@ -19,10 +31,22 @@ type ReadyState = {
 
 const BRIDGE_READY_TIMEOUT_MS = 10_000;
 
+function buildRendererLoadOptions(messages?: WebBluetoothBridgeWindowMessages): Electron.LoadFileOptions | undefined {
+  if (!messages) {
+    return undefined;
+  }
+
+  return {
+    query: Object.fromEntries(
+      Object.entries(messages).map(([key, value]) => [key, value]),
+    ),
+  };
+}
+
 export interface WebBluetoothBridgeWindowManager {
   ensureWindow(): BrowserWindow;
   ensureWindowReady(): Promise<BrowserWindow>;
-  showPairingWindow(): Promise<BrowserWindow>;
+  showPairingWindow(options?: { autoConnect?: boolean }): Promise<BrowserWindow>;
   getWindow(): BrowserWindow | null;
   destroy(): void;
 }
@@ -31,17 +55,28 @@ function isBridgeBluetoothPermission(permission: string): boolean {
   return permission === 'bluetooth' || permission === 'bluetooth-scan';
 }
 
-function chooseBluetoothDevice(devices: BluetoothDevice[]): string {
+function chooseBluetoothDevice(devices: BluetoothDevice[]): string | null {
   const preferred = devices.find((device) =>
-    device.deviceName?.startsWith('ComBrief-Remote'),
+    device.deviceName?.startsWith('ComBrief'),
   );
-  return preferred?.deviceId ?? devices[0]?.deviceId ?? '';
+  if (preferred) {
+    return preferred.deviceId;
+  }
+
+  if (devices.length === 1) {
+    return devices[0].deviceId;
+  }
+
+  return null;
 }
 
 function configureBluetoothSession(window: BrowserWindow): void {
   window.webContents.on('select-bluetooth-device', (event, devices, callback) => {
     event.preventDefault();
-    callback(chooseBluetoothDevice(devices));
+    const selectedDeviceId = chooseBluetoothDevice(devices);
+    if (selectedDeviceId) {
+      callback(selectedDeviceId);
+    }
   });
   const bridgeSession = window.webContents.session;
   bridgeSession.setPermissionCheckHandler((webContents, permission) =>
@@ -52,7 +87,11 @@ function configureBluetoothSession(window: BrowserWindow): void {
   });
 }
 
-function createReadyState(window: BrowserWindow, rendererPath: string): ReadyState {
+function createReadyState(
+  window: BrowserWindow,
+  rendererPath: string,
+  messages?: WebBluetoothBridgeWindowMessages,
+): ReadyState {
   let settled = false;
   let rejectReady!: (error: Error) => void;
 
@@ -97,8 +136,13 @@ function createReadyState(window: BrowserWindow, rendererPath: string): ReadySta
     );
   });
 
+  const rendererLoadOptions = buildRendererLoadOptions(messages);
+  const rendererLoadPromise = rendererLoadOptions
+    ? window.loadFile(rendererPath, rendererLoadOptions)
+    : window.loadFile(rendererPath);
+
   const promise = Promise.all([
-    window.loadFile(rendererPath).catch((error: unknown) => {
+    rendererLoadPromise.catch((error: unknown) => {
       reject(error instanceof Error ? error : new Error(String(error)));
       throw error;
     }),
@@ -117,6 +161,12 @@ export function createWebBluetoothBridgeWindowManager(
 ): WebBluetoothBridgeWindowManager {
   let bridgeWindow: BrowserWindow | null = null;
   let bridgeWindowReady: ReadyState | null = null;
+  let destroyingBridgeWindow = false;
+  let quittingApp = false;
+
+  app.on('before-quit', () => {
+    quittingApp = true;
+  });
 
   function clearBridgeWindow(nextWindow: BrowserWindow): void {
     if (bridgeWindow === nextWindow) {
@@ -152,7 +202,15 @@ export function createWebBluetoothBridgeWindowManager(
 
     bridgeWindow = nextWindow;
     configureBluetoothSession(nextWindow);
-    bridgeWindowReady = createReadyState(nextWindow, options.rendererPath);
+    nextWindow.on('close', (event) => {
+      if (destroyingBridgeWindow || quittingApp) {
+        return;
+      }
+
+      event.preventDefault();
+      nextWindow.hide();
+    });
+    bridgeWindowReady = createReadyState(nextWindow, options.rendererPath, options.messages);
     void bridgeWindowReady.promise.catch(() => undefined);
     nextWindow.on('closed', () => {
       bridgeWindowReady?.reject(new Error('ComBrief Remote bridge closed before ready'));
@@ -167,10 +225,13 @@ export function createWebBluetoothBridgeWindowManager(
     return bridgeWindowReady?.promise ?? Promise.resolve(window);
   }
 
-  async function showPairingWindow(): Promise<BrowserWindow> {
+  async function showPairingWindow(options?: { autoConnect?: boolean }): Promise<BrowserWindow> {
     const window = await ensureWindowReady();
     window.show();
     window.focus();
+    if (options?.autoConnect) {
+      window.webContents.send(HARDWARE_BRIDGE_CHANNELS.connect);
+    }
     return window;
   }
 
@@ -181,7 +242,12 @@ export function createWebBluetoothBridgeWindowManager(
     bridgeWindow = null;
 
     if (existingWindow) {
-      existingWindow.destroy();
+      destroyingBridgeWindow = true;
+      try {
+        existingWindow.destroy();
+      } finally {
+        destroyingBridgeWindow = false;
+      }
     }
   }
 

@@ -14,7 +14,16 @@ describe('ComBrief Remote HaaS end-to-end validation guide', () => {
       'npm run build',
       'HaaS Studio',
       '烧录',
-      'ComBrief-Remote',
+      'ComBrief',
+      'cd /Users/silverwing/develop/alios_iot/solutions/combrief_remote',
+      'aos make',
+      'ota_rtos.bin',
+      'python3 -m serial.tools.list_ports',
+      '/dev/cu.usbserial-AU03OSLJ',
+      '2ndboot',
+      'CCCC',
+      'Burn "[...]" success',
+      'OLED: Waiting BLE',
       'Connect Remote',
       'K1',
       'K2',
@@ -32,7 +41,7 @@ describe('ComBrief Remote HaaS end-to-end validation guide', () => {
 
     for (const text of [
       '当前仓库不编译 HaaS 固件',
-      'BLE/OLED/input/LED/power 外设适配为 placeholder',
+      'OLED/K1-K4/LED/BLE GATT/ADC battery 已接入 HaaS EDU K1 API',
       'HaaS SDK 实机验证',
       'Disconnect 是临时断开',
     ]) {

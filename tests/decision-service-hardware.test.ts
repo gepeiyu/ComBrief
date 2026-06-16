@@ -67,6 +67,78 @@ afterEach(() => {
 });
 
 describe('DecisionService hardware channel', () => {
+  it('resends pending hardware requests after reconnect', async () => {
+    vi.useFakeTimers();
+    const cfg = hardwareConfig();
+    const transport = new MockHardwareTransport();
+    let service!: DecisionService;
+    const hardware = new HardwareRuntime(transport, {
+      onDecision: (message) => service.resolveFromHardware(message),
+    });
+    await hardware.start();
+    transport.setConnected(false);
+    service = new DecisionService(
+      () => cfg,
+      null,
+      new DecisionQueue(),
+      () => getSlackCardLabels('en'),
+      hardware,
+    );
+
+    const wait = service.handleWait(permissionBody());
+    expect(transport.sentMessages).toHaveLength(0);
+
+    transport.setConnected(true);
+    service.resendPendingHardwareRequests();
+
+    const requests = transport.sentMessages.filter((message) => message.type === 'request');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      type: 'request',
+      brief: 'Do you want to proceed?',
+    });
+
+    vi.advanceTimersByTime(51_000);
+    await wait;
+    vi.useRealTimers();
+  });
+
+  it('does not resend hardware requests that were already delivered', async () => {
+    vi.useFakeTimers();
+    const { transport, service } = await setupHardwareService();
+
+    const wait = service.handleWait(permissionBody());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.sentMessages.filter((message) => message.type === 'request')).toHaveLength(1);
+    service.resendPendingHardwareRequests();
+    expect(transport.sentMessages.filter((message) => message.type === 'request')).toHaveLength(1);
+
+    vi.advanceTimersByTime(51_000);
+    await wait;
+    vi.useRealTimers();
+  });
+
+  it('reports active pending hardware requests while a remote decision is waiting', async () => {
+    vi.useFakeTimers();
+    const { service } = await setupHardwareService();
+
+    const wait = service.handleWait(permissionBody());
+    expect(service.hasPendingHardwareRequests()).toBe(true);
+
+    expect(
+      service.resolveLocalTerminal({
+        sessionId: 'sess-remote',
+        toolName: 'Bash',
+        kind: 'allow',
+      }),
+    ).toBe(true);
+    expect(service.hasPendingHardwareRequests()).toBe(false);
+
+    await wait;
+  });
+
   it('sends hardware request when Slack is disabled and expires without hanging', async () => {
     vi.useFakeTimers();
     const { transport, service } = await setupHardwareService();
@@ -378,6 +450,41 @@ describe('DecisionService hardware channel', () => {
     });
   });
 
+  it('logs hardware request send failures for diagnosis without blocking the decision flow', async () => {
+    vi.useFakeTimers();
+    const cfg = hardwareConfig();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const hardware = {
+      async sendRequest() {
+        throw new Error('GATT write failed');
+      },
+      async sendResolved() {
+        return undefined;
+      },
+    } as HardwareRuntime;
+    const service = new DecisionService(
+      () => cfg,
+      null,
+      new DecisionQueue(),
+      () => getSlackCardLabels('en'),
+      hardware,
+    );
+
+    const wait = service.handleWait(permissionBody());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(warn).toHaveBeenCalledWith(
+      'ComBrief Remote request push failed',
+      expect.objectContaining({ toolName: 'Bash', error: 'GATT write failed' }),
+    );
+
+    vi.advanceTimersByTime(51_000);
+    const result = await wait;
+    expect(result.hookStdout).toBeNull();
+    warn.mockRestore();
+  });
+
   it('completes after local resolution even when hardware request send never settles', async () => {
     vi.useFakeTimers();
     const cfg = hardwareConfig();
@@ -426,6 +533,50 @@ describe('DecisionService hardware channel', () => {
       type: 'resolved',
       decisionId: request?.decisionId,
       result: 'expired',
+    });
+  });
+
+  it('keeps AskUserQuestion pending past the normal timeout so hardware can still answer', async () => {
+    vi.useFakeTimers();
+    const { transport, service } = await setupHardwareService();
+
+    const wait = service.handleWait(
+      permissionBody({
+        toolName: 'AskUserQuestion',
+        toolInput: {
+          questions: [
+            {
+              question: '这个项目的文档位置约定包含 docs/solutions/，对吗？',
+              options: [{ label: '对' }, { label: '错' }],
+            },
+          ],
+        },
+      }),
+    );
+    const request = latestRequest(transport);
+
+    vi.advanceTimersByTime(51_000);
+    await Promise.resolve();
+
+    expect(service.hasPendingHardwareRequests()).toBe(true);
+    expect(transport.sentMessages.filter((message) => message.type === 'resolved')).toHaveLength(0);
+
+    transport.emitDeviceMessage({
+      protocol: 1,
+      type: 'decision',
+      decisionId: request?.decisionId ?? '',
+      optionId: 'option:0',
+      ts: Date.now(),
+    });
+
+    const result = await wait;
+
+    expect(result.requestId).toBe(request?.decisionId);
+    expect(result.hookStdout).toContain('对');
+    expect(transport.sentMessages.at(-1)).toMatchObject({
+      type: 'resolved',
+      decisionId: request?.decisionId,
+      result: 'selected',
     });
   });
 });

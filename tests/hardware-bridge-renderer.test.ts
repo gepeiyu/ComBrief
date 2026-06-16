@@ -29,6 +29,10 @@ function extractBlock(source: string, marker: string): string {
   throw new Error(`${marker} block was not closed`);
 }
 
+async function waitForHostWrites(ms = 80): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createBridgeDocument() {
   const clickHandlers = new Map<string, () => void>();
   const elements = new Map<string, { textContent: string; disabled?: boolean; addEventListener?: (event: string, handler: () => void) => void }>([
@@ -81,6 +85,14 @@ describe('hardware bridge renderer assets', () => {
     expect(preload).not.toContain('setConfig');
   });
 
+  it('keeps the bridge preload self-contained for Electron sandboxed preload execution', () => {
+    const preload = readProjectFile('src/preload/hardware-bridge-preload.ts');
+
+    expect(preload).not.toMatch(/from ['"]\.\.\//);
+    expect(preload).not.toContain('require(');
+    expect(preload).toContain('HARDWARE_BRIDGE_CHANNELS');
+  });
+
   it('forwards only object payloads for host messages from preload', () => {
     const preload = readProjectFile('src/preload/hardware-bridge-preload.ts');
     const objectCommandBlock = extractBlock(preload, 'function onBridgeObjectCommand');
@@ -125,6 +137,32 @@ describe('hardware bridge renderer assets', () => {
     );
   });
 
+  it('loads localized pairing copy from URL query parameters', () => {
+    const html = readProjectFile('src/renderer/hardware-bridge.html');
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+
+    expect(html).toContain('id="bridge-title"');
+    expect(html).toContain('id="bridge-description"');
+    expect(renderer).toContain("new URLSearchParams(window.location?.search || '')");
+    expect(renderer).toContain("applyBridgeCopy('title', bridgeTitle)");
+    expect(renderer).toContain("applyBridgeCopy('button', connectButton)");
+    expect(renderer).toContain("applyBridgeCopy('initialStatus', bridgeStatus)");
+  });
+
+  it('uses a broad Web Bluetooth scan and reports scan failures in the pairing window', () => {
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const connectOnceBlock = extractBlock(renderer, 'async function connectOnce(activeEpoch)');
+
+    const reportErrorBlock = extractBlock(renderer, 'function reportError');
+
+    expect(connectOnceBlock).toContain("filters: [{ namePrefix: REMOTE_NAME }]");
+    expect(connectOnceBlock).not.toContain('acceptAllDevices: true');
+    expect(connectOnceBlock).toContain('optionalServices: [SERVICE_UUID]');
+    expect(connectOnceBlock).toContain('updateStatusText(copy.scanningStatus)');
+    expect(connectOnceBlock).toContain('updateStatusText(copy.connectingStatus)');
+    expect(reportErrorBlock).toContain('updateStatusText(`${copy.errorPrefix}${message}`)');
+  });
+
   it('uses Web Bluetooth with the ComBrief remote service and characteristics', () => {
     const renderer = readProjectFile('src/renderer/hardware-bridge.js');
     const connectOnceBlock = extractBlock(renderer, 'async function connectOnce(activeEpoch)');
@@ -135,7 +173,8 @@ describe('hardware bridge renderer assets', () => {
     expect(renderer).toContain('TextEncoder');
     expect(renderer).toContain('TextDecoder');
     expect(connectOnceBlock).toContain('navigator.bluetooth.requestDevice');
-    expect(connectOnceBlock).toContain('filters: [{ name: REMOTE_NAME, services: [SERVICE_UUID] }]');
+    expect(connectOnceBlock).toContain("filters: [{ namePrefix: REMOTE_NAME }]");
+    expect(connectOnceBlock).not.toContain('acceptAllDevices: true');
     expect(connectOnceBlock).toContain('optionalServices: [SERVICE_UUID]');
     expect(connectOnceBlock).toContain('getPrimaryService(SERVICE_UUID)');
     expect(connectOnceBlock).toContain('getCharacteristic(HOST_TX_UUID)');
@@ -143,14 +182,14 @@ describe('hardware bridge renderer assets', () => {
     expect(connectOnceBlock).toContain('startNotifications');
   });
 
-  it('only starts Web Bluetooth from the pairing button click handler', () => {
+  it('starts Web Bluetooth from the pairing button or connect IPC command', () => {
     const renderer = readProjectFile('src/renderer/hardware-bridge.js');
     const startScanBlock = extractBlock(renderer, 'window.combriefHardwareBridge?.onStartScan');
     const connectCommandBlock = extractBlock(renderer, 'window.combriefHardwareBridge?.onConnect');
 
     expect(startScanBlock).not.toContain('connect()');
     expect(startScanBlock).not.toContain('requestDevice');
-    expect(connectCommandBlock).not.toContain('connect()');
+    expect(connectCommandBlock).toContain('connect()');
     expect(connectCommandBlock).not.toContain('requestDevice');
     expect(renderer).toContain("const connectButton = document.getElementById('connect-button');");
     expect(renderer).toContain("connectButton?.addEventListener('click'");
@@ -193,6 +232,7 @@ describe('hardware bridge renderer assets', () => {
       TextDecoder,
       TextEncoder,
       setTimeout,
+      URLSearchParams,
       document: bridgeDocument.document,
       navigator: {
         bluetooth: {
@@ -234,6 +274,62 @@ describe('hardware bridge renderer assets', () => {
     await flush();
 
     expect(bridgeDocument.getConnectButton()?.disabled).toBe(false);
+  });
+
+  it('does not report a connection failure when a host message arrives while pairing is still in progress', async () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    }
+
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const errors: string[] = [];
+    const statuses: Array<{ lastError?: string | null; scanning?: boolean }> = [];
+    const bridgeDocument = createBridgeDocument();
+    const request = deferred<unknown>();
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => request.promise,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: (status: { lastError?: string | null; scanning?: boolean }) => statuses.push(status),
+          sendDeviceMessage: () => undefined,
+          sendError: (message: string) => errors.push(message),
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+
+    bridgeDocument.clickConnect();
+    await flush();
+    callbacks.get('sendHostMessage')?.({ protocol: 1, type: 'state', apps: [] });
+    await flush();
+
+    expect(errors).toEqual([]);
+    expect(statuses.at(-1)?.scanning).toBe(true);
+    expect(statuses.at(-1)?.lastError).toBeNull();
+    expect(bridgeDocument.getConnectButton()?.disabled).toBe(true);
   });
 
   it('cancels stale in-flight connects before they can publish connected status', () => {
@@ -376,6 +472,7 @@ describe('hardware bridge renderer assets', () => {
       TextDecoder,
       TextEncoder,
       setTimeout,
+      URLSearchParams,
       document: bridgeDocument.document,
       navigator: {
         bluetooth: {
@@ -541,6 +638,7 @@ describe('hardware bridge renderer assets', () => {
       TextDecoder,
       TextEncoder,
       setTimeout,
+      URLSearchParams,
       document: bridgeDocument.document,
       navigator: {
         bluetooth: {
@@ -636,21 +734,450 @@ describe('hardware bridge renderer assets', () => {
     expect(renderer).toMatch(/sendStatus\(\{ started: true \}\);\s*$/);
   });
 
-  it('registers bridge commands and reports v1 oversize writes as errors', () => {
-    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
-    const sendHostMessageBlock = extractBlock(renderer, 'async function sendHostMessage');
+  it('reports host write success back to the main process', async () => {
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
-    expect(renderer).toContain('const BRIDGE_V1_SINGLE_FRAME_MAX_BYTES = 1400;');
-    expect(renderer).toContain('const MAX_HOST_MESSAGE_BYTES = BRIDGE_V1_SINGLE_FRAME_MAX_BYTES;');
-    expect(renderer).toContain('window.combriefHardwareBridge?.onStartScan');
-    expect(renderer).toContain('window.combriefHardwareBridge?.onConnect');
-    expect(renderer).toContain("connectButton?.addEventListener('click'");
-    expect(renderer).toContain('window.combriefHardwareBridge?.onDisconnect');
-    expect(renderer).toContain('window.combriefHardwareBridge?.onSendHostMessage');
-    expect(sendHostMessageBlock).toContain('byteLength > MAX_HOST_MESSAGE_BYTES');
-    expect(sendHostMessageBlock).toContain('v1 single-frame limit');
-    expect(sendHostMessageBlock).toContain('reportError(error);');
-    expect(sendHostMessageBlock).toContain('writeValueWithoutResponse');
-    expect(sendHostMessageBlock).toContain('writeValue');
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const hostResults: Array<Record<string, unknown>> = [];
+    const bridgeDocument = createBridgeDocument();
+    let writeWithResponseCalls = 0;
+    const hostTx = {
+      async writeValueWithResponse() {
+        writeWithResponseCalls += 1;
+      },
+      async writeValueWithoutResponse() {
+        throw new Error('without response should not be used for host probes');
+      },
+    };
+    const deviceTx = {
+      async startNotifications() {
+        return undefined;
+      },
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+    };
+    const fakeDevice = {
+      name: 'ComBrief',
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+      gatt: {
+        connected: false,
+        disconnect() {
+          this.connected = false;
+        },
+        async connect() {
+          this.connected = true;
+          return {
+            async getPrimaryService() {
+              return {
+                async getCharacteristic(uuid: string) {
+                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => fakeDevice,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: () => undefined,
+          sendDeviceMessage: () => undefined,
+          sendError: () => undefined,
+          sendHostMessageResult: (result: Record<string, unknown>) => hostResults.push(result),
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+    bridgeDocument.clickConnect();
+    await flush();
+    await flush();
+    await flush();
+
+    callbacks.get('sendHostMessage')?.({
+      id: 'host-write-1',
+      message: { protocol: 1, type: 'state', apps: [], ts: 1 },
+    });
+    await waitForHostWrites();
+
+    expect(writeWithResponseCalls).toBeGreaterThan(1);
+    expect(hostResults).toEqual([{ id: 'host-write-1', ok: true, error: null }]);
+  });
+
+  it('splits host messages into confirmed BLE-sized chunks', async () => {
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const hostResults: Array<Record<string, unknown>> = [];
+    const bridgeDocument = createBridgeDocument();
+    const chunks: string[] = [];
+    const decoder = new TextDecoder();
+    const hostTx = {
+      async writeValueWithResponse(bytes: Uint8Array) {
+        chunks.push(decoder.decode(bytes));
+      },
+    };
+    const deviceTx = {
+      async startNotifications() {
+        return undefined;
+      },
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+    };
+    const fakeDevice = {
+      name: 'ComBrief',
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+      gatt: {
+        connected: false,
+        disconnect() {
+          this.connected = false;
+        },
+        async connect() {
+          this.connected = true;
+          return {
+            async getPrimaryService() {
+              return {
+                async getCharacteristic(uuid: string) {
+                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => fakeDevice,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: () => undefined,
+          sendDeviceMessage: () => undefined,
+          sendError: () => undefined,
+          sendHostMessageResult: (result: Record<string, unknown>) => hostResults.push(result),
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+    bridgeDocument.clickConnect();
+    await flush();
+    await flush();
+    await flush();
+
+    const message = {
+      protocol: 1,
+      type: 'request',
+      appName: 'ComBrief',
+      appVersion: '0.1.3',
+      decisionId: 'test-1234567890',
+      source: 'combrief-test',
+      sourceLabel: 'TEST',
+      kind: 'PERMISSION',
+      brief: 'Test display',
+      content: 'ComBrief test\\n21:30:00',
+      options: [{ id: 'ok', label: 'OK' }],
+      defaultFocus: 'ok',
+      expiresAt: 1234567890,
+    };
+    callbacks.get('sendHostMessage')?.({ id: 'host-write-chunked', message });
+    await waitForHostWrites(300);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => new TextEncoder().encode(chunk).byteLength <= 20)).toBe(true);
+    expect(chunks.slice(0, -1).every((chunk) => chunk.startsWith('>'))).toBe(true);
+    expect(chunks.at(-1)?.startsWith('!')).toBe(true);
+    expect(chunks.map((chunk) => chunk.slice(1)).join('')).toBe(JSON.stringify(message));
+    expect(hostResults).toEqual([{ id: 'host-write-chunked', ok: true, error: null }]);
+  });
+
+  it('reports host write errors instead of falling back to unconfirmed writes', async () => {
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const hostResults: Array<Record<string, unknown>> = [];
+    const errors: string[] = [];
+    const bridgeDocument = createBridgeDocument();
+    let writeWithoutResponseCalls = 0;
+    const hostTx = {
+      async writeValueWithResponse() {
+        throw new Error('GATT write with response failed');
+      },
+      async writeValueWithoutResponse() {
+        writeWithoutResponseCalls += 1;
+      },
+    };
+    const deviceTx = {
+      async startNotifications() {
+        return undefined;
+      },
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+    };
+    const fakeDevice = {
+      name: 'ComBrief',
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+      gatt: {
+        connected: false,
+        disconnect() {
+          this.connected = false;
+        },
+        async connect() {
+          this.connected = true;
+          return {
+            async getPrimaryService() {
+              return {
+                async getCharacteristic(uuid: string) {
+                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => fakeDevice,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: () => undefined,
+          sendDeviceMessage: () => undefined,
+          sendError: (message: string) => errors.push(message),
+          sendHostMessageResult: (result: Record<string, unknown>) => hostResults.push(result),
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+    bridgeDocument.clickConnect();
+    await flush();
+    await flush();
+    await flush();
+
+    callbacks.get('sendHostMessage')?.({
+      id: 'host-write-2',
+      message: { protocol: 1, type: 'state', apps: [], ts: 1 },
+    });
+    await waitForHostWrites();
+
+    expect(writeWithoutResponseCalls).toBe(0);
+    expect(hostResults).toEqual([
+      { id: 'host-write-2', ok: false, error: 'GATT write with response failed' },
+    ]);
+    expect(errors).toEqual(['GATT write with response failed']);
+  });
+
+  it('serializes concurrent host messages so BLE chunks are not interleaved', async () => {
+    function reassembledMessages(chunkTexts: string[]) {
+      const messages: string[] = [];
+      let buffer = '';
+      for (const chunk of chunkTexts) {
+        buffer += chunk.slice(1);
+        if (chunk.startsWith('!')) {
+          messages.push(buffer);
+          buffer = '';
+        }
+      }
+      return messages;
+    }
+
+    async function waitForQueue(ms = 500) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    const renderer = readProjectFile('src/renderer/hardware-bridge.js');
+    const callbacks = new Map<string, (payload?: unknown) => void>();
+    const hostResults: Array<Record<string, unknown>> = [];
+    const bridgeDocument = createBridgeDocument();
+    const chunks: string[] = [];
+    const decoder = new TextDecoder();
+    let writeDelayMs = 5;
+    const hostTx = {
+      async writeValueWithResponse(bytes: Uint8Array) {
+        await new Promise((resolve) => setTimeout(resolve, writeDelayMs));
+        chunks.push(decoder.decode(bytes));
+      },
+    };
+    const deviceTx = {
+      async startNotifications() {
+        return undefined;
+      },
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+    };
+    const fakeDevice = {
+      name: 'ComBrief',
+      addEventListener() {
+        return undefined;
+      },
+      removeEventListener() {
+        return undefined;
+      },
+      gatt: {
+        connected: false,
+        disconnect() {
+          this.connected = false;
+        },
+        async connect() {
+          this.connected = true;
+          return {
+            async getPrimaryService() {
+              return {
+                async getCharacteristic(uuid: string) {
+                  return uuid.startsWith('7b5c0002') ? hostTx : deviceTx;
+                },
+              };
+            },
+          };
+        },
+      },
+    };
+
+    const context = createContext({
+      TextDecoder,
+      TextEncoder,
+      setTimeout,
+      URLSearchParams,
+      document: bridgeDocument.document,
+      navigator: {
+        bluetooth: {
+          requestDevice: async () => fakeDevice,
+        },
+      },
+      window: {
+        combriefHardwareBridge: {
+          onStartScan: (handler: (payload?: unknown) => void) => callbacks.set('startScan', handler),
+          onConnect: (handler: (payload?: unknown) => void) => callbacks.set('connect', handler),
+          onDisconnect: (handler: (payload?: unknown) => void) => callbacks.set('disconnect', handler),
+          onSendHostMessage: (handler: (payload?: unknown) => void) => callbacks.set('sendHostMessage', handler),
+          sendStatus: () => undefined,
+          sendDeviceMessage: () => undefined,
+          sendError: () => undefined,
+          sendHostMessageResult: (result: Record<string, unknown>) => hostResults.push(result),
+        },
+      },
+    });
+
+    new Script(renderer).runInContext(context);
+    bridgeDocument.clickConnect();
+    await waitForQueue(0);
+
+    const stateMessage = {
+      protocol: 1,
+      type: 'state',
+      apps: [{ appId: 'claude-code', label: 'CC', state: 'waiting_user' }],
+      ts: 1,
+    };
+    const requestMessage = {
+      protocol: 1,
+      type: 'request',
+      appName: 'ComBrief',
+      appVersion: '0.1.3',
+      decisionId: 'test-concurrent-send',
+      source: 'combrief-test',
+      sourceLabel: 'TEST',
+      kind: 'PERMISSION',
+      brief: 'Do you want to proceed?',
+      content: 'ComBrief concurrent test',
+      options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }],
+      defaultFocus: 'yes',
+      expiresAt: 1234567890,
+    };
+
+    callbacks.get('sendHostMessage')?.({ id: 'host-state', message: stateMessage });
+    callbacks.get('sendHostMessage')?.({ id: 'host-request', message: requestMessage });
+    await waitForQueue();
+
+    const messages = reassembledMessages(chunks);
+    expect(messages).toHaveLength(2);
+    expect(JSON.parse(messages[0])).toMatchObject({ type: 'state' });
+    expect(JSON.parse(messages[1])).toMatchObject({ type: 'request', brief: 'Do you want to proceed?' });
+    expect(hostResults).toEqual([
+      { id: 'host-state', ok: true, error: null },
+      { id: 'host-request', ok: true, error: null },
+    ]);
   });
 });

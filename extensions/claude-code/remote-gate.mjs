@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { promptLocalDecision } from './permission-prompt.mjs';
 
 const APP_ID = 'claude-code';
+const ASK_USER_QUESTION_DECISION_TIMEOUT_MS = 60 * 60 * 1000;
 const home = join(homedir(), '.combrief');
 
 function eventLoggingEnabled(config) {
@@ -44,6 +45,13 @@ function resolveHookEvent(input) {
 
 function isGateEvent(hookName) {
   return hookName === 'PermissionRequest';
+}
+
+function decisionChannelEnabled(config) {
+  return Boolean(
+    config.slack?.enabled ||
+      (config.hardware?.enabled && config.hardware?.decisionPushEnabled),
+  );
 }
 
 function postJson(config, path, body, timeoutMs) {
@@ -127,23 +135,30 @@ if (!existsSync(join(home, 'config.json'))) {
 }
 
 const config = loadConfig();
-if (!config.slack?.enabled) {
+if (!decisionChannelEnabled(config)) {
   process.exit(0);
 }
 
 await reportState(config, 'permissionRequest', input);
+
+const baseDecisionTimeoutMs = config.slack?.decisionTimeoutMs ?? 600_000;
+const toolName = input.tool_name ?? input.toolName ?? 'unknown';
+const decisionTimeoutMs =
+  toolName === 'AskUserQuestion'
+    ? Math.max(baseDecisionTimeoutMs, ASK_USER_QUESTION_DECISION_TIMEOUT_MS)
+    : baseDecisionTimeoutMs;
 
 const waitBody = JSON.stringify({
   appId: APP_ID,
   hookEvent: 'permissionRequest',
   sessionId: input.session_id,
   cwd: input.cwd,
-  toolName: input.tool_name ?? input.toolName ?? 'unknown',
+  toolName,
   toolInput: input.tool_input ?? {},
   raw: input,
 });
 
-const timeoutMs = (config.slack?.decisionTimeoutMs ?? 600_000) + 30_000;
+const timeoutMs = decisionTimeoutMs + 30_000;
 const locale = config.locale ?? 'en';
 
 const slackWait = postJson(config, '/v1/decision/wait', waitBody, timeoutMs);

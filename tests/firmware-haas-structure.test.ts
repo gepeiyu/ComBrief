@@ -7,7 +7,7 @@ const readFirmwareFile = (name: string) => readFileSync(join(firmwareDir, name),
 
 describe('HaaS ComBrief Remote firmware skeleton', () => {
   it('includes the required firmware project files', () => {
-    for (const file of ['README.md', 'package.yaml', 'SConstruct', 'combrief_remote.c']) {
+    for (const file of ['README.md', 'package.yaml', 'SConstruct', 'Makefile', 'combrief_remote.c']) {
       expect(existsSync(join(firmwareDir, file)), `${file} should exist`).toBe(true);
     }
   });
@@ -20,7 +20,16 @@ describe('HaaS ComBrief Remote firmware skeleton', () => {
       'solutions/combrief_remote',
       '烧录',
       '串口日志',
-      'ComBrief-Remote',
+      'ComBrief',
+      'cd /Users/silverwing/develop/alios_iot/solutions/combrief_remote',
+      'aos make',
+      'ota_rtos.bin',
+      'python3 -m serial.tools.list_ports',
+      '/dev/cu.usbserial-AU03OSLJ',
+      '2ndboot',
+      'CCCC',
+      'Burn "[...]" success',
+      'OLED: Waiting BLE',
       '桌面连接验证步骤',
     ]) {
       expect(readme).toContain(text);
@@ -40,7 +49,7 @@ describe('HaaS ComBrief Remote firmware skeleton', () => {
       'power',
       'host_tx',
       'device_tx',
-      'placeholder',
+      'ADC battery',
       'HaaS Studio',
       'K1',
       'K2',
@@ -58,7 +67,7 @@ describe('HaaS ComBrief Remote firmware skeleton', () => {
     const source = readFirmwareFile('combrief_remote.c');
 
     expect(source).toContain('7b5c0001-8d4a-4c3a-9b4f-434252465001');
-    expect(source).toContain('ComBrief-Remote');
+    expect(source).toContain('ComBrief');
   });
 
   it('references planned module source and include paths in SConstruct', () => {

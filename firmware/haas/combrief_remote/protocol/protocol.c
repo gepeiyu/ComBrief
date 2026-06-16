@@ -81,16 +81,27 @@ static bool json_escape(char *out, size_t out_len, const char *value)
 
 bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app_state_t *state)
 {
-    uint8_t battery = state == NULL ? 0 : state->battery_percent;
+    if (state != NULL && state->battery_known) {
+        return write_payload(
+            out,
+            out_len,
+            "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"battery\":%u,\"capabilities\":{\"briefFullToggle\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
+            COMBRIEF_REMOTE_NAME,
+            COMBRIEF_REMOTE_PLATFORM,
+            COMBRIEF_REMOTE_FW_VERSION,
+            (unsigned int)state->battery_percent,
+            COMBRIEF_MAX_OPTIONS,
+            COMBRIEF_MAX_BRIEF_LEN,
+            COMBRIEF_MAX_CONTENT_LEN);
+    }
 
     return write_payload(
         out,
         out_len,
-        "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"battery\":%u,\"capabilities\":{\"briefFullToggle\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
+        "{\"protocol\":1,\"type\":\"hello\",\"deviceName\":\"%s\",\"platform\":\"%s\",\"fwVersion\":\"%s\",\"capabilities\":{\"briefFullToggle\":true,\"maxOptions\":%d,\"maxBriefLen\":%d,\"maxContentLen\":%d}}",
         COMBRIEF_REMOTE_NAME,
         COMBRIEF_REMOTE_PLATFORM,
         COMBRIEF_REMOTE_FW_VERSION,
-        (unsigned int)battery,
         COMBRIEF_MAX_OPTIONS,
         COMBRIEF_MAX_BRIEF_LEN,
         COMBRIEF_MAX_CONTENT_LEN);
@@ -129,13 +140,15 @@ bool combrief_protocol_build_decision(char *out, size_t out_len, const combrief_
 
 bool combrief_protocol_build_battery(char *out, size_t out_len, const combrief_app_state_t *state)
 {
-    uint8_t battery = state == NULL ? 0 : state->battery_percent;
+    if (state == NULL || !state->battery_known) {
+        return false;
+    }
 
     return write_payload(
         out,
         out_len,
         "{\"protocol\":1,\"type\":\"battery\",\"battery\":%u}",
-        (unsigned int)battery);
+        (unsigned int)state->battery_percent);
 }
 
 static bool is_json_object(const char *json)
@@ -314,11 +327,13 @@ static bool extract_top_level_string(const char *json, const char *key, char *ou
     cursor++;
 
     while (*cursor != '\0' && *cursor != '"') {
+        char ch = *cursor;
         if (*cursor == '\\' && cursor[1] != '\0') {
             cursor++;
+            ch = *cursor == 'n' ? '\n' : (*cursor == 'r' ? '\r' : (*cursor == 't' ? '\t' : *cursor));
         }
         if (i + 1 < out_len) {
-            out[i++] = *cursor;
+            out[i++] = ch;
         }
         cursor++;
     }
@@ -672,11 +687,104 @@ static bool extract_apps_primary_status(const char *json, char *out, size_t out_
     return out[0] != '\0';
 }
 
+static const char *display_status_label(const char *status)
+{
+    if (status == NULL || status[0] == '\0') {
+        return "UNK";
+    }
+    if (strcmp(status, "idle") == 0 || strcmp(status, "ready") == 0 || strcmp(status, "Ready") == 0) {
+        return "OK";
+    }
+    if (strcmp(status, "working") == 0 || strcmp(status, "Working") == 0) {
+        return "WORK";
+    }
+    if (strcmp(status, "waiting_user") == 0 || strcmp(status, "waiting") == 0) {
+        return "ASK";
+    }
+    if (strcmp(status, "offline") == 0) {
+        return "OFF";
+    }
+    return status;
+}
+
+static bool append_summary_part(char *out, size_t out_len, const char *label, const char *status)
+{
+    size_t used;
+    int written;
+    const char *display_status;
+
+    if (out == NULL || out_len == 0 || label == NULL || label[0] == '\0' || status == NULL || status[0] == '\0') {
+        return false;
+    }
+
+    used = strlen(out);
+    if (used >= out_len - 1) {
+        return false;
+    }
+
+    display_status = display_status_label(status);
+    written = snprintf(
+        out + used,
+        out_len - used,
+        "%s%s [%s]",
+        used == 0 ? "" : "\n",
+        label,
+        display_status);
+    return written > 0 && (size_t)written < out_len - used;
+}
+
+static bool extract_apps_summary(const char *json, char *out, size_t out_len)
+{
+    char app_label[25];
+    char app_status[32];
+    const char *apps;
+    const char *array_end;
+    const char *cursor;
+    uint8_t count = 0;
+
+    if (out == NULL || out_len == 0) {
+        return false;
+    }
+    out[0] = '\0';
+
+    apps = value_after_key(json, "\"apps\"");
+    if (apps == NULL || *apps != '[') {
+        return false;
+    }
+    array_end = find_matching_json_container(apps, '[', ']');
+    if (array_end == NULL) {
+        return false;
+    }
+
+    cursor = apps + 1;
+    while (count < 2 && cursor < array_end && (cursor = strchr(cursor, '{')) != NULL && cursor < array_end) {
+        const char *object_end = find_matching_json_container(cursor, '{', '}');
+        if (object_end == NULL || object_end > array_end) {
+            return false;
+        }
+
+        app_label[0] = '\0';
+        app_status[0] = '\0';
+        (void)extract_json_string_between(cursor, object_end, "\"label\"", app_label, sizeof(app_label));
+        (void)extract_json_string_between(cursor, object_end, "\"status\"", app_status, sizeof(app_status));
+        if (append_summary_part(out, out_len, app_label, app_status)) {
+            count++;
+        }
+
+        cursor = object_end + 1;
+    }
+
+    return out[0] != '\0';
+}
+
 static bool apply_state_message(combrief_app_state_t *state, const char *json)
 {
     char status[64];
+    char summary[64];
     uint8_t battery;
     bool state_changed = false;
+
+    summary[0] = '\0';
 
     if (top_level_bool_equals(json, "\"connected\"", true) || top_level_bool_equals(json, "\"bleConnected\"", true)) {
         combrief_app_state_set_ble_connected(state, true);
@@ -688,6 +796,11 @@ static bool apply_state_message(combrief_app_state_t *state, const char *json)
     }
     if (extract_top_level_uint(json, "\"battery\"", &battery)) {
         combrief_app_state_set_battery(state, battery);
+        state_changed = true;
+    }
+    if (extract_top_level_string(json, "\"appSummary\"", summary, sizeof(summary)) ||
+        extract_apps_summary(json, summary, sizeof(summary))) {
+        combrief_app_state_set_app_summary(state, summary);
         state_changed = true;
     }
     if (extract_apps_primary_status(json, status, sizeof(status)) ||
@@ -708,6 +821,7 @@ static bool apply_request_message(combrief_app_state_t *state, const char *json)
     char content[COMBRIEF_MAX_CONTENT_LEN + 1];
     combrief_option_t options[COMBRIEF_MAX_OPTIONS];
     uint8_t option_count;
+    bool applied;
 
     memset(options, 0, sizeof(options));
     decision_id[0] = '\0';
@@ -716,6 +830,7 @@ static bool apply_request_message(combrief_app_state_t *state, const char *json)
 
     (void)extract_top_level_string(json, "\"decisionId\"", decision_id, sizeof(decision_id));
     if (decision_id[0] == '\0') {
+        printf("ComBrief request rejected missing decisionId\n");
         return false;
     }
 
@@ -723,10 +838,17 @@ static bool apply_request_message(combrief_app_state_t *state, const char *json)
     (void)extract_top_level_string(json, "\"content\"", content, sizeof(content));
     option_count = extract_request_options(json, options, COMBRIEF_MAX_OPTIONS);
     if (option_count == 0) {
+        printf("ComBrief request rejected options=0 briefLen=%u\n", (unsigned int)strlen(brief));
         return false;
     }
 
-    return combrief_app_state_set_request(state, decision_id, brief, content, options, option_count);
+    applied = combrief_app_state_set_request(state, decision_id, brief, content, options, option_count);
+    printf("ComBrief request %s briefLen=%u contentLen=%u options=%u\n",
+        applied ? "applied" : "rejected",
+        (unsigned int)strlen(brief),
+        (unsigned int)strlen(content),
+        (unsigned int)option_count);
+    return applied;
 }
 
 static bool is_resolved_result(const char *result)

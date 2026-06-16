@@ -1,5 +1,9 @@
 #include <stdio.h>
 
+#if defined(BOARD_HAASEDUK1)
+#include <aos/kernel.h>
+#endif
+
 #include "app_state/app_state.h"
 #include "protocol/protocol.h"
 #include "ble_service/ble_service.h"
@@ -8,7 +12,7 @@
 #include "led/led.h"
 #include "power/power.h"
 
-#define COMBRIEF_REMOTE_DEVICE_NAME "ComBrief-Remote"
+#define COMBRIEF_REMOTE_DEVICE_NAME "ComBrief"
 #define COMBRIEF_REMOTE_SERVICE_UUID "7b5c0001-8d4a-4c3a-9b4f-434252465001"
 
 int application_start(int argc, char *argv[])
@@ -37,6 +41,9 @@ int application_start(int argc, char *argv[])
         input_tick();
         led_tick();
         power_tick();
+#if defined(BOARD_HAASEDUK1)
+        aos_msleep(300);
+#endif
     }
 
     return 0;

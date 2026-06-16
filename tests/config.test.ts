@@ -57,7 +57,7 @@ describe('config', () => {
   it('defaultConfig includes disabled ComBrief Remote hardware', () => {
     expect(defaultHardwareConfig()).toEqual({
       enabled: false,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       autoReconnect: true,
       lastDeviceId: '',
       statusPushEnabled: true,
@@ -82,12 +82,29 @@ describe('config', () => {
 
     expect(loaded.hardware).toEqual({
       enabled: true,
-      deviceName: 'ComBrief-Remote',
+      deviceName: 'ComBrief',
       autoReconnect: true,
       lastDeviceId: 'device-1',
       statusPushEnabled: true,
       decisionPushEnabled: true,
     });
+  });
+
+  it('migrates the legacy ComBrief Remote hardware name when loading', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({
+        hardware: {
+          enabled: true,
+          deviceName: 'ComBrief-Remote',
+        },
+      }),
+    );
+
+    const loaded = loadConfig(dir);
+
+    expect(loaded.hardware.deviceName).toBe('ComBrief');
   });
 
   it('resolves tray abbrev from config override', () => {

@@ -1,27 +1,12 @@
-import os
+#! /bin/env python
 
-# Task 8 only declares planned module paths; Task 9/10 will add these source files.
+from aostools import Make
 
-src = Split('''
-    combrief_remote.c
-    app_state/app_state.c
-    protocol/protocol.c
-    ble_service/ble_service.c
-    display/display.c
-    input/input.c
-    led/led.c
-    power/power.c
-''')
+# Source and include paths are declared in package.yaml for this AliOS SDK.
+# Kept here for HaaS Studio / source reviewers: app_state, protocol,
+# ble_service, display, input, led, power.
+defconfig = Make()
 
-component = aos_component('combrief_remote', src)
+Export('defconfig')
 
-component.add_includes(
-    '.',
-    'app_state',
-    'protocol',
-    'ble_service',
-    'display',
-    'input',
-    'led',
-    'power',
-)
+defconfig.build_components()

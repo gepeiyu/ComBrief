@@ -13,6 +13,11 @@ export interface ServerOptions {
     timestamp: number;
     meta?: StateMeta;
   }) => void;
+  onLocalDecisionResolved?: (payload: {
+    appId: string;
+    sessionId?: string;
+    toolName: string;
+  }) => void;
   getDecisionService?: () => DecisionService | null;
   getSlackStatus?: () => { connected: boolean; lastError: string | null };
   onSlackTest?: () => Promise<void>;
@@ -148,6 +153,13 @@ export function createCombriefServer(opts: ServerOptions): http.Server {
               kind: parsed.kind,
               detail: parsed.detail,
             }) ?? false;
+          if (ok) {
+            opts.onLocalDecisionResolved?.({
+              appId: parsed.appId,
+              sessionId: parsed.sessionId,
+              toolName: parsed.toolName,
+            });
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok }));
         } catch {

@@ -58,15 +58,75 @@ describe('AppController hardware snapshots', () => {
     expect(snapshot).toMatchObject({
       protocol: 1,
       type: 'state',
-      appName: 'ComBrief',
-      appVersion: '0.1.2',
       primary: 'cursor',
+      primaryStatus: 'waiting_user',
+      appSummary: 'CC [WORK]\nC [ASK]',
     });
-    expect(snapshot.ts).toEqual(expect.any(Number));
-    expect(snapshot.apps).toEqual([
-      { id: 'claude-code', label: 'CC', status: 'working' },
-      { id: 'cursor', label: 'C', status: 'waiting_user' },
-    ]);
+    expect(snapshot).not.toHaveProperty('apps');
+  });
+
+  it('reports when timeout ticks change app state so hardware can be pushed', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(30);
+    const controller = makeController();
+
+    controller.handleState({
+      appId: 'cursor',
+      event: 'preToolUse',
+      timestamp: 20,
+      meta: { toolName: 'Shell' },
+    });
+
+    expect(controller.tickTimeouts()).toBe(true);
+    expect(controller.getHardwareStateSnapshot('0.1.2')).toMatchObject({
+      primary: 'cursor',
+      primaryStatus: 'waiting_user',
+      appSummary: 'CC [OK]\nC [ASK]',
+    });
+    expect(controller.tickTimeouts()).toBe(false);
+  });
+
+  it('clears pending approval after local terminal confirmation before timeout ticks', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10);
+    const controller = makeController();
+
+    controller.handleState({
+      appId: 'claude-code',
+      event: 'permissionRequest',
+      timestamp: 10,
+      meta: { toolName: 'Bash' },
+    });
+
+    expect(controller.clearPendingApproval('claude-code')).toBe(true);
+    vi.setSystemTime(20);
+    expect(controller.tickTimeouts()).toBe(false);
+    expect(controller.getHardwareStateSnapshot('0.1.2')).toMatchObject({
+      primary: 'claude-code',
+      primaryStatus: 'working',
+      appSummary: 'CC [WORK]\nC [OK]',
+    });
+  });
+
+  it('moves already waiting approval back to working after local terminal confirmation', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(30);
+    const controller = makeController();
+
+    controller.handleState({
+      appId: 'claude-code',
+      event: 'permissionRequest',
+      timestamp: 10,
+      meta: { toolName: 'Bash' },
+    });
+    expect(controller.tickTimeouts()).toBe(true);
+
+    expect(controller.clearPendingApproval('claude-code')).toBe(true);
+    expect(controller.getHardwareStateSnapshot('0.1.2')).toMatchObject({
+      primary: 'claude-code',
+      primaryStatus: 'working',
+      appSummary: 'CC [WORK]\nC [OK]',
+    });
   });
 
   it('selects working primary before falling back to the first app', () => {
@@ -81,6 +141,30 @@ describe('AppController hardware snapshots', () => {
     });
 
     expect(controller.getHardwareStateSnapshot('0.1.2').primary).toBe('cursor');
+  });
+
+  it('keeps hardware state snapshots compact for low-latency BLE writes', () => {
+    const controller = makeController();
+
+    controller.handleState({
+      appId: 'claude-code',
+      event: 'beforeSubmitPrompt',
+      timestamp: 10,
+    });
+
+    const snapshot = controller.getHardwareStateSnapshot('0.1.2');
+    const encoded = JSON.stringify(snapshot);
+
+    expect(snapshot).toMatchObject({
+      protocol: 1,
+      type: 'state',
+      primary: 'claude-code',
+      primaryStatus: 'working',
+      appSummary: 'CC [WORK]\nC [OK]',
+    });
+    expect(encoded).not.toContain('appVersion');
+    expect(encoded).not.toContain('lastEventAt');
+    expect(Buffer.byteLength(encoded, 'utf8')).toBeLessThanOrEqual(130);
   });
 
   it('merges nested hardware config updates without dropping existing fields', () => {

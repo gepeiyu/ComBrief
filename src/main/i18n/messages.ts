@@ -55,6 +55,16 @@ export type Messages = {
     slackSetupGuide: string;
     slackSetupGuideTitle: string;
   };
+  remotePairing: {
+    title: string;
+    description: string;
+    button: string;
+    initialStatus: string;
+    scanningStatus: string;
+    connectingStatus: string;
+    connectedStatus: string;
+    errorPrefix: string;
+  };
   slackCard: {
     allowOnce: string;
     deny: string;
@@ -147,6 +157,16 @@ const en: Messages = {
     slackCardTitle: 'Claude Code needs your approval',
     slackSetupGuide: 'Open Slack setup guide…',
     slackSetupGuideTitle: 'Slack remote approval — setup guide',
+  },
+  remotePairing: {
+    title: 'Pair ComBrief Remote',
+    description: 'Click the button below, then choose your ComBrief Remote in the Bluetooth picker.',
+    button: 'Connect ComBrief Remote',
+    initialStatus: 'Waiting for your click to start Bluetooth pairing.',
+    scanningStatus: 'Scanning for ComBrief Remote… Keep the HaaS EDU K1 powered on and showing Waiting BLE.',
+    connectingStatus: 'Device selected. Connecting to ComBrief Remote…',
+    connectedStatus: 'Connected. You can leave this window open.',
+    errorPrefix: 'Connection failed: ',
   },
   slackCard: {
     allowOnce: 'Allow once',
@@ -247,6 +267,16 @@ const zh: Messages = {
     slackSetupGuide: '打开 Slack 配置指南…',
     slackSetupGuideTitle: 'Slack 远程确认 — 配置指南',
   },
+  remotePairing: {
+    title: '配对 ComBrief Remote',
+    description: '点击下面的按钮，然后在蓝牙选择器中选择你的 ComBrief Remote。',
+    button: '连接 ComBrief Remote',
+    initialStatus: '等待点击按钮开始蓝牙配对。',
+    scanningStatus: '正在扫描 ComBrief Remote… 请保持 HaaS EDU K1 开机，并显示 Waiting BLE。',
+    connectingStatus: '已选择设备，正在连接 ComBrief Remote…',
+    connectedStatus: '已连接。此窗口可以保持打开。',
+    errorPrefix: '连接失败：',
+  },
   slackCard: {
     allowOnce: '允许（本次）',
     deny: '拒绝',
@@ -345,6 +375,16 @@ const ja: Messages = {
     slackCardTitle: 'Claude Code の承認が必要です',
     slackSetupGuide: 'Slack 設定ガイドを開く…',
     slackSetupGuideTitle: 'Slack リモート承認 — 設定ガイド',
+  },
+  remotePairing: {
+    title: 'ComBrief Remote をペアリング',
+    description: '下のボタンをクリックし、Bluetooth ピッカーで ComBrief Remote を選択してください。',
+    button: 'ComBrief Remote に接続',
+    initialStatus: 'Bluetooth ペアリング開始待ちです。',
+    scanningStatus: 'ComBrief Remote をスキャン中… HaaS EDU K1 の電源を入れ、Waiting BLE 表示を確認してください。',
+    connectingStatus: 'デバイスを選択しました。ComBrief Remote に接続中…',
+    connectedStatus: '接続しました。このウィンドウは開いたままで構いません。',
+    errorPrefix: '接続失敗: ',
   },
   slackCard: {
     allowOnce: '許可（今回のみ）',

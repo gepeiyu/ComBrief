@@ -32,13 +32,16 @@ import { TrayManager } from './tray-manager';
 import { APP_REGISTRY } from './apps/registry';
 import { HardwareRuntime } from './hardware/runtime';
 import { WebBluetoothBridgeTransport } from './hardware/web-bluetooth-bridge-transport';
+import { HardwareStatePusher } from './hardware/state-pusher';
 import { createWebBluetoothBridgeWindowManager } from './hardware/web-bluetooth-bridge-window';
+import { refreshRegisteredAppScripts } from './installer/install-app';
 
 let controller: AppController;
 let trayManager: TrayManager;
 let slackRuntime: SlackRuntime;
 let hardwareRuntime: HardwareRuntime;
 let hardwareTransport: WebBluetoothBridgeTransport;
+let hardwareStatePusher: HardwareStatePusher;
 let mainWindow: BrowserWindow | null = null;
 const registeredApps = new Set<string>();
 
@@ -77,10 +80,23 @@ async function restartHardware(): Promise<void> {
   }
 }
 
+function hardwareDecisionPushEnabled(): boolean {
+  const cfg = controller.getConfig();
+  return cfg.hardware.enabled && cfg.hardware.decisionPushEnabled;
+}
+
 function pushHardwareStateIfEnabled(): void {
   const cfg = controller.getConfig();
   if (!cfg.hardware.enabled || !cfg.hardware.statusPushEnabled) return;
-  void sendHardwareStateSnapshot().catch(logHardwareStatePushError);
+  if (slackRuntime.getDecisionService()?.hasPendingHardwareRequests()) return;
+  hardwareStatePusher.request();
+}
+
+function tickControllerTimeoutsAndPushHardwareState(): void {
+  if (controller.tickTimeouts()) {
+    pushHardwareStateIfEnabled();
+    slackRuntime.getDecisionService()?.resendPendingHardwareRequests();
+  }
 }
 
 /** 把日志开关写入 config，供 bridge 子进程读取 */
@@ -201,6 +217,7 @@ function registerIpc(): void {
       saveConfig(combriefHome(), controller.getConfig());
     }
     await hardwareRuntime.start();
+    await restartSlack();
     await hardwareTransport.openPairing();
     return hardwareRuntime.getStatus();
   });
@@ -211,12 +228,28 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('hardware:testDisplay', async () => {
-    await hardwareRuntime.sendResolved({
+    const status = hardwareRuntime.getStatus();
+    if (!status.started || !status.connected) {
+      throw new Error('ComBrief Remote is not connected');
+    }
+
+    const now = Date.now();
+    await hardwareRuntime.sendRequest({
       protocol: 1,
-      type: 'resolved',
-      decisionId: 'test',
-      result: 'selected',
-      message: 'Hello Remote',
+      type: 'request',
+      appName: 'ComBrief',
+      appVersion: app.getVersion(),
+      decisionId: `test-${now}`,
+      source: 'combrief-test',
+      sourceLabel: 'TEST',
+      kind: 'PERMISSION',
+      brief: 'Test display',
+      content: `ComBrief test\n${new Date(now).toLocaleTimeString()}`,
+      options: [
+        { id: 'ok', label: 'OK' },
+      ],
+      defaultFocus: 'ok',
+      expiresAt: now + 60_000,
     });
     return { ok: true };
   });
@@ -256,6 +289,7 @@ app.whenReady().then(async () => {
     saveConfig(combriefHome(), cfg);
   }
   for (const appId of cfg.apps) registeredApps.add(appId);
+  refreshRegisteredAppScripts(cfg.apps);
 
   trayManager = new TrayManager({
     onOpenSettings: openSettings,
@@ -270,16 +304,34 @@ app.whenReady().then(async () => {
   const bridgeWindowManager = createWebBluetoothBridgeWindowManager({
     preloadPath: join(__dirname, '..', 'preload', 'hardware-bridge-preload.js'),
     rendererPath: join(__dirname, '..', 'renderer', 'hardware-bridge.html'),
+    messages: settingsMessages().remotePairing,
   });
   hardwareTransport = new WebBluetoothBridgeTransport(bridgeWindowManager, ipcMain);
   hardwareRuntime = new HardwareRuntime(
     hardwareTransport,
     {
       onDecision: (message) => {
+        if (message.decisionId.startsWith('test-')) {
+          void hardwareRuntime.sendResolved({
+            protocol: 1,
+            type: 'resolved',
+            decisionId: message.decisionId,
+            result: 'selected',
+            message: 'Test display acknowledged',
+          }).catch(logHardwareStatePushError);
+          return;
+        }
         slackRuntime.getDecisionService()?.resolveFromHardware(message);
       },
-      onHello: () => sendHardwareStateSnapshotSafely(),
+      onHello: () => {
+        pushHardwareStateIfEnabled();
+        slackRuntime.getDecisionService()?.resendPendingHardwareRequests();
+      },
     },
+  );
+  hardwareStatePusher = new HardwareStatePusher(
+    sendHardwareStateSnapshot,
+    logHardwareStatePushError,
   );
 
   slackRuntime = new SlackRuntime(
@@ -287,13 +339,6 @@ app.whenReady().then(async () => {
     slackCardLabels,
     () => hardwareRuntime,
   );
-  if (cfg.hardware.enabled) {
-    await hardwareRuntime.start();
-    if (cfg.hardware.statusPushEnabled) {
-      await sendHardwareStateSnapshotSafely();
-    }
-  }
-  await slackRuntime.restart();
 
   const server = createCombriefServer({
     token: cfg.token,
@@ -301,6 +346,14 @@ app.whenReady().then(async () => {
     onState: (payload) => {
       controller.handleState(payload);
       slackRuntime.getDecisionService()?.tryResolveFromLocal(payload);
+      if (payload.event === 'permissionRequest' && hardwareDecisionPushEnabled()) {
+        slackRuntime.getDecisionService()?.resendPendingHardwareRequests();
+      } else {
+        pushHardwareStateIfEnabled();
+      }
+    },
+    onLocalDecisionResolved: (payload) => {
+      controller.clearPendingApproval(payload.appId);
       pushHardwareStateIfEnabled();
     },
     getDecisionService: () => slackRuntime.getDecisionService(),
@@ -313,9 +366,20 @@ app.whenReady().then(async () => {
     server.on('error', reject);
   });
 
+  if (cfg.hardware.enabled) {
+    await hardwareRuntime.start();
+    if (cfg.hardware.autoReconnect) {
+      void hardwareTransport.openPairing({ autoConnect: true }).catch(logHardwareStatePushError);
+    }
+    if (cfg.hardware.statusPushEnabled) {
+      await sendHardwareStateSnapshotSafely();
+    }
+  }
+  await slackRuntime.restart();
+
   registerIpc();
 
-  setInterval(() => controller.tickTimeouts(), 1000);
+  setInterval(() => tickControllerTimeoutsAndPushHardwareState(), 1000);
   setInterval(() => trayManager.tickAnimations(), 100);
 
   if (cfg.apps.length === 0 && !wasOpenedAtLogin()) {

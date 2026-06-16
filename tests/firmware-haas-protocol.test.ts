@@ -150,7 +150,7 @@ int main(void)
     check_bool("hello payload builds", combrief_protocol_build_hello(payload, sizeof(payload), &state), true);
     check_contains("hello protocol", payload, "\"protocol\":1");
     check_contains("hello type", payload, "\"type\":\"hello\"");
-    check_contains("hello device", payload, "\"deviceName\":\"ComBrief-Remote\"");
+    check_contains("hello device", payload, "\"deviceName\":\"ComBrief\"");
     check_contains("hello platform", payload, "\"platform\":\"haas-edu-k1\"");
     check_contains("hello fw", payload, "\"fwVersion\":\"0.1.0\"");
 
@@ -161,10 +161,15 @@ int main(void)
     check_contains("decision option", payload, "\"optionId\":\"allow\"");
     check_contains("decision ts", payload, "\"ts\":");
 
-    check_bool("battery payload builds", combrief_protocol_build_battery(payload, sizeof(payload), &state), true);
+    check_bool("battery payload builds", combrief_protocol_build_battery(payload, sizeof(payload), &state), false);
+    combrief_app_state_set_battery(&state, 100);
+    check_bool("known battery payload builds", combrief_protocol_build_battery(payload, sizeof(payload), &state), true);
     check_contains("battery protocol", payload, "\"protocol\":1");
     check_contains("battery type", payload, "\"type\":\"battery\"");
     check_contains("battery value", payload, "\"battery\":100");
+
+    combrief_app_state_set_battery_unknown(&state);
+    check_bool("unknown battery payload omitted", combrief_protocol_build_battery(payload, sizeof(payload), &state), false);
 
     if (failures != 0) {
         return 1;
@@ -182,11 +187,11 @@ int main(void)
 
     for (const text of [
       '#define COMBRIEF_PROTOCOL_VERSION 1',
-      '#define COMBRIEF_MAX_BRIEF_LEN 64',
-      '#define COMBRIEF_MAX_CONTENT_LEN 1024',
-      '#define COMBRIEF_MAX_OPTIONS 8',
-      '#define COMBRIEF_MAX_OPTION_LABEL_LEN 24',
-      '#define COMBRIEF_REMOTE_NAME "ComBrief-Remote"',
+      '#define COMBRIEF_MAX_BRIEF_LEN 48',
+      '#define COMBRIEF_MAX_CONTENT_LEN 80',
+      '#define COMBRIEF_MAX_OPTIONS 3',
+      '#define COMBRIEF_MAX_OPTION_LABEL_LEN 12',
+      '#define COMBRIEF_REMOTE_NAME "ComBrief"',
       '#define COMBRIEF_REMOTE_PLATFORM "haas-edu-k1"',
       '#define COMBRIEF_REMOTE_FW_VERSION "0.1.0"',
     ]) {
@@ -215,6 +220,14 @@ int main(void)
     for (const text of ['\\"protocol\\":1', '\\"type\\":\\"battery\\"', '\\"battery\\":%u']) {
       expect(battery).toContain(text);
     }
+
+    const summaryPart = extractFunction(source, 'append_summary_part');
+    expect(summaryPart).toContain('\\n');
+    expect(summaryPart).toContain('[%s]');
+    expect(source).toContain('OK');
+    expect(source).toContain('WORK');
+    expect(source).toContain('ASK');
+    expect(source).toContain('OFF');
 
     const decision = extractFunction(source, 'combrief_protocol_build_decision');
     for (const text of [
@@ -419,6 +432,13 @@ int main(void)
         combrief_protocol_apply_host_message(&state, "{\"protocol\":1,\"type\":\"state\",\"apps\":[{\"id\":\"cursor\",\"status\":\"idle\"},{\"id\":\"agent\",\"status\":\"working\"}],\"primary\":\"cursor\"}"),
         true);
     check_string("apps working status", state.primary_status, "working");
+
+    check_bool(
+        "top-level app summary applies",
+        combrief_protocol_apply_host_message(&state, "{\"protocol\":1,\"type\":\"state\",\"appSummary\":\"CC [WORK]\\nC [OK]\",\"primaryStatus\":\"working\"}"),
+        true);
+    check_string("top-level app summary", state.app_summary, "CC [WORK]\nC [OK]");
+    check_string("top-level primary status compact", state.primary_status, "working");
 
     if (failures != 0) {
         return 1;

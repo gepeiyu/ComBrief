@@ -1,5 +1,6 @@
 import type { PendingDecision } from '../decision/types';
 import type { DecisionAction } from '../slack/hook-stdout';
+import { extractPermissionSuggestions } from '../slack/permission-suggestions';
 import type { HardwareDecisionMessage } from './protocol';
 import { extractHardwareAskOptions } from './request-builder';
 
@@ -27,6 +28,16 @@ export function mapHardwareDecisionToAction(
 
   if (decision.optionId === 'allow') {
     return { kind: 'allowOnce' };
+  }
+
+  const allowAlwaysMatch = /^allowAlways:(\d+)$/.exec(decision.optionId);
+  if (allowAlwaysMatch) {
+    const suggestions = extractPermissionSuggestions(pending.body.raw);
+    const suggestion = suggestions[Number(allowAlwaysMatch[1])];
+    if (suggestion) {
+      return { kind: 'allowAlways', suggestion };
+    }
+    return null;
   }
 
   if (decision.optionId === 'deny') {

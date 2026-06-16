@@ -11,14 +11,17 @@ type MockWindow = {
   destroyed: boolean;
   webContents: {
     on: ReturnType<typeof vi.fn>;
+    send: ReturnType<typeof vi.fn>;
     emitSelectBluetoothDevice: (devices: Array<{ deviceId: string; deviceName?: string }>) => string;
     session: MockSession;
   };
   emitClosed: () => void;
+  emitClose: () => { defaultPrevented: boolean };
   loadFile: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   off: ReturnType<typeof vi.fn>;
   show: ReturnType<typeof vi.fn>;
+  hide: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
   isDestroyed: ReturnType<typeof vi.fn>;
@@ -44,8 +47,17 @@ const electronMock = vi.hoisted(() => {
       return ipcMain;
     }),
   };
+  const app = {
+    beforeQuitListeners: new Set<() => void>(),
+    on: vi.fn((event: string, listener: () => void) => {
+      if (event === 'before-quit') {
+        app.beforeQuitListeners.add(listener);
+      }
+      return app;
+    }),
+  };
   const BrowserWindow = vi.fn((options: unknown) => {
-    const handlers = new Map<string, Array<() => void>>();
+    const handlers = new Map<string, Array<(event?: unknown) => void>>();
     let selectBluetoothDeviceHandler:
       | ((
           event: { preventDefault: ReturnType<typeof vi.fn> },
@@ -84,6 +96,7 @@ const electronMock = vi.hoisted(() => {
         }
         return webContents;
       }),
+      send: vi.fn(),
       emitSelectBluetoothDevice(devices: Array<{ deviceId: string; deviceName?: string }>) {
         let selected = 'not-called';
         selectBluetoothDeviceHandler?.(
@@ -105,13 +118,25 @@ const electronMock = vi.hoisted(() => {
           handler();
         }
       },
+      emitClose: () => {
+        const event = {
+          defaultPrevented: false,
+          preventDefault: vi.fn(() => {
+            event.defaultPrevented = true;
+          }),
+        };
+        for (const handler of handlers.get('close') ?? []) {
+          handler(event as never);
+        }
+        return event;
+      },
       loadFile: vi.fn(
         () =>
           new Promise<void>((resolve, reject) => {
             loadFileSettlers.push({ resolve, reject });
           }),
       ),
-      on: vi.fn((event: string, handler: () => void) => {
+      on: vi.fn((event: string, handler: (event?: unknown) => void) => {
         handlers.set(event, [...(handlers.get(event) ?? []), handler]);
         return window;
       }),
@@ -123,6 +148,7 @@ const electronMock = vi.hoisted(() => {
         return window;
       }),
       show: vi.fn(),
+      hide: vi.fn(),
       focus: vi.fn(),
       destroy: vi.fn(() => {
         window.destroyed = true;
@@ -137,9 +163,12 @@ const electronMock = vi.hoisted(() => {
   return {
     BrowserWindow,
     ipcMain,
+    app,
     instances,
     reset() {
       ipcListeners.clear();
+      app.beforeQuitListeners.clear();
+      app.on.mockClear();
       BrowserWindow.mockClear();
       ipcMain.on.mockClear();
       ipcMain.off.mockClear();
@@ -172,6 +201,7 @@ const electronMock = vi.hoisted(() => {
 vi.mock('electron', () => ({
   BrowserWindow: electronMock.BrowserWindow,
   ipcMain: electronMock.ipcMain,
+  app: electronMock.app,
 }));
 
 import { HARDWARE_BRIDGE_CHANNELS } from '../src/main/hardware/bridge-ipc';
@@ -254,12 +284,27 @@ describe('WebBluetoothBridgeWindowManager', () => {
     );
     expect(window.webContents.emitSelectBluetoothDevice([
       { deviceId: 'keyboard', deviceName: 'Keyboard' },
-      { deviceId: 'remote', deviceName: 'ComBrief-Remote v1' },
+      { deviceId: 'remote', deviceName: 'ComBrief v1' },
     ])).toBe('remote');
     expect(window.webContents.emitSelectBluetoothDevice([
+      { deviceId: 'generic', deviceName: '蓝牙设备' },
+    ])).toBe('generic');
+    expect(window.webContents.emitSelectBluetoothDevice([
+      { deviceId: 'generic', deviceName: 'Bluetooth Device' },
+    ])).toBe('generic');
+    expect(window.webContents.emitSelectBluetoothDevice([
+      { deviceId: 'keyboard', deviceName: 'Keyboard' },
+      { deviceId: 'generic', deviceName: '蓝牙设备' },
+    ])).toBe('not-called');
+    expect(window.webContents.emitSelectBluetoothDevice([
+      { deviceId: 'headphones', deviceName: 'Headphones' },
+      { deviceId: 'generic', deviceName: 'Bluetooth Device' },
+    ])).toBe('not-called');
+    expect(window.webContents.emitSelectBluetoothDevice([
       { deviceId: 'first', deviceName: 'First Device' },
-    ])).toBe('first');
-    expect(window.webContents.emitSelectBluetoothDevice([])).toBe('');
+      { deviceId: 'second', deviceName: 'Second Device' },
+    ])).toBe('not-called');
+    expect(window.webContents.emitSelectBluetoothDevice([])).toBe('not-called');
   });
 
   it('shows and focuses the ready bridge window for pairing', async () => {
@@ -276,6 +321,24 @@ describe('WebBluetoothBridgeWindowManager', () => {
     expect(electronMock.instances[0]?.show).toHaveBeenCalledOnce();
     expect(electronMock.instances[0]?.focus).toHaveBeenCalledOnce();
   });
+
+  it('sends connect to the ready bridge window when pairing starts with auto connect', async () => {
+    const manager = createWebBluetoothBridgeWindowManager({
+      rendererPath: '/app/renderer/hardware-bridge.html',
+      preloadPath: '/app/preload/hardware-bridge-preload.js',
+    });
+
+    const pairingPromise = manager.showPairingWindow({ autoConnect: true });
+    electronMock.resolveNextLoadFile();
+    electronMock.emitIpc(HARDWARE_BRIDGE_CHANNELS.ready, electronMock.instances[0]?.webContents);
+
+    await expect(pairingPromise).resolves.toBe(electronMock.instances[0]);
+    expect(electronMock.instances[0]?.show).toHaveBeenCalledOnce();
+    expect(electronMock.instances[0]?.focus).toHaveBeenCalledOnce();
+    expect(electronMock.instances[0]?.webContents.send).toHaveBeenCalledWith(
+      HARDWARE_BRIDGE_CHANNELS.connect,
+    );
+  });
   it('configures minimal Web Bluetooth permissions for the bridge session', () => {
     const manager = createWebBluetoothBridgeWindowManager({
       rendererPath: '/app/renderer/web-bluetooth-bridge.html',
@@ -286,6 +349,38 @@ describe('WebBluetoothBridgeWindowManager', () => {
 
     expect(window.webContents.session.setPermissionCheckHandler).toHaveBeenCalledWith(expect.any(Function));
     expect(window.webContents.session.setPermissionRequestHandler).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('hides the bridge window instead of destroying it when the user closes pairing UI', () => {
+    const manager = createWebBluetoothBridgeWindowManager({
+      rendererPath: '/app/renderer/web-bluetooth-bridge.html',
+      preloadPath: '/app/preload/web-bluetooth-bridge-preload.js',
+    });
+
+    const window = manager.ensureWindow();
+    const event = window.emitClose();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(window.hide).toHaveBeenCalledOnce();
+    expect(manager.getWindow()).toBe(window);
+  });
+
+  it('allows the bridge window to close while the app is quitting', () => {
+    const manager = createWebBluetoothBridgeWindowManager({
+      rendererPath: '/app/renderer/web-bluetooth-bridge.html',
+      preloadPath: '/app/preload/web-bluetooth-bridge-preload.js',
+    });
+
+    const window = manager.ensureWindow();
+
+    expect(electronMock.app.on).toHaveBeenCalledWith('before-quit', expect.any(Function));
+    for (const listener of electronMock.app.beforeQuitListeners) {
+      listener();
+    }
+    const event = window.emitClose();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(window.hide).not.toHaveBeenCalled();
   });
 
   it('clears the cached window after closed and creates a new one', () => {

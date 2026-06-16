@@ -43,6 +43,20 @@ describe('i18n', () => {
     }
   });
 
+  it('provides localized remote pairing window strings for each locale', () => {
+    for (const locale of ['en', 'zh', 'ja'] as const) {
+      const pairing = getMessages(locale).remotePairing;
+      expect(pairing.title).toEqual(expect.any(String));
+      expect(pairing.description).toEqual(expect.any(String));
+      expect(pairing.button).toEqual(expect.any(String));
+      expect(pairing.initialStatus).toEqual(expect.any(String));
+      expect(pairing.scanningStatus).toEqual(expect.any(String));
+      expect(pairing.connectingStatus).toEqual(expect.any(String));
+      expect(pairing.errorPrefix).toEqual(expect.any(String));
+    }
+    expect(getMessages('zh').remotePairing.button).toContain('连接');
+  });
+
   it('renderer messages are IPC-cloneable (no functions)', () => {
     const m = getRendererMessages('en');
     expect(() => structuredClone(m)).not.toThrow();

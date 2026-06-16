@@ -119,6 +119,10 @@ export function loadConfig(home = combriefHome()): CombriefConfig {
   }
   const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<CombriefConfig>;
   const base = defaultConfig();
+  const rawHardware: Partial<HardwareConfig> = raw.hardware ?? {};
+  const hardwareDeviceName = rawHardware.deviceName === 'ComBrief-Remote'
+    ? COMBRIEF_REMOTE_NAME
+    : rawHardware.deviceName;
   return {
     ...base,
     ...raw,
@@ -135,7 +139,8 @@ export function loadConfig(home = combriefHome()): CombriefConfig {
     },
     hardware: {
       ...base.hardware,
-      ...(raw.hardware ?? {}),
+      ...rawHardware,
+      deviceName: hardwareDeviceName ?? base.hardware.deviceName,
     },
   };
 }

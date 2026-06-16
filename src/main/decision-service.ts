@@ -1,6 +1,11 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
-import type { CombriefConfig } from './config';
+import { basename, join } from 'node:path';
+import {
+  combriefHome,
+  resolveEventLoggingEnabled,
+  type CombriefConfig,
+} from './config';
 import { DecisionQueue } from './decision-queue';
 import type { DecisionWaitBody, PendingDecision } from './decision/types';
 import type { StateEvent, StateMeta } from './state-machine';
@@ -37,6 +42,8 @@ import type { HardwareRuntime } from './hardware/runtime';
 
 type ResolutionVia = 'slack' | 'local' | 'hardware';
 
+const ASK_USER_QUESTION_DECISION_TIMEOUT_MS = 60 * 60 * 1000;
+
 interface SlackCardSnapshot {
   channelId: string;
   ts: string;
@@ -61,6 +68,20 @@ type CardResolution =
     }
   | { kind: 'already' };
 
+function appendDecisionLog(cfg: CombriefConfig, message: string): void {
+  if (!resolveEventLoggingEnabled(cfg)) return;
+  try {
+    const logDir = join(combriefHome(), 'logs');
+    mkdirSync(logDir, { recursive: true });
+    appendFileSync(
+      join(logDir, 'events.log'),
+      `${new Date().toISOString()} hardware-decision ${message}\n`,
+    );
+  } catch {
+    // ignore logging errors
+  }
+}
+
 export interface StatePayload {
   appId: string;
   event: StateEvent;
@@ -78,6 +99,7 @@ export class DecisionService {
   private sessionIndex = new Map<string, string>();
   private cardSnapshots = new Map<string, SlackCardSnapshot>();
   private hardwareResolvedRequestIds = new Set<string>();
+  private hardwareRequestDelivered = new Set<string>();
   private nonTimeoutResolvedRequestIds = new Set<string>();
 
   constructor(
@@ -99,6 +121,10 @@ export class DecisionService {
     }
 
     const requestId = randomUUID();
+    const decisionTimeoutMs =
+      body.toolName === 'AskUserQuestion'
+        ? Math.max(cfg.slack.decisionTimeoutMs, ASK_USER_QUESTION_DECISION_TIMEOUT_MS)
+        : cfg.slack.decisionTimeoutMs;
     this.pendingMeta.set(requestId, {
       requestId,
       body,
@@ -108,7 +134,7 @@ export class DecisionService {
       this.sessionIndex.set(body.sessionId, requestId);
     }
 
-    const waitPromise = this.queue.wait(requestId, cfg.slack.decisionTimeoutMs);
+    const waitPromise = this.queue.wait(requestId, decisionTimeoutMs);
 
     if (cfg.slack.enabled && this.slack) {
       void this.postCard(requestId, body).catch(() => {
@@ -117,18 +143,7 @@ export class DecisionService {
     }
 
     if (hardwareDecisionEnabled && this.hardware) {
-      void this.hardware
-        .sendRequest(
-          buildHardwareRequest(
-            requestId,
-            body,
-            process.env.npm_package_version ?? '0.0.0',
-            cfg.slack.decisionTimeoutMs,
-          ),
-        )
-        .catch(() => {
-          /* 决策通道仍可由 Slack / 本地 / 超时完成 */
-        });
+      this.pushHardwareRequest(requestId, body, cfg, decisionTimeoutMs);
     }
 
     try {
@@ -136,7 +151,8 @@ export class DecisionService {
 
       if (
         result.hookStdout === null &&
-        !this.nonTimeoutResolvedRequestIds.has(requestId)
+        !this.nonTimeoutResolvedRequestIds.has(requestId) &&
+        body.toolName !== 'AskUserQuestion'
       ) {
         this.sendHardwareResolved(requestId, 'expired', 'Request expired');
       }
@@ -155,6 +171,37 @@ export class DecisionService {
     } finally {
       this.clearPending(requestId, body.sessionId);
     }
+  }
+
+  resendPendingHardwareRequests(): void {
+    const cfg = this.getConfig();
+    const hardwareDecisionEnabled =
+      cfg.hardware.enabled && cfg.hardware.decisionPushEnabled && this.hardware !== null;
+    if (!hardwareDecisionEnabled || !this.hardware) {
+      return;
+    }
+
+    for (const [requestId, pending] of this.pendingMeta) {
+      if (!this.queue.isWaiting(requestId)) {
+        continue;
+      }
+      if (this.hardwareRequestDelivered.has(requestId)) {
+        continue;
+      }
+      this.pushHardwareRequest(requestId, pending.body, cfg);
+    }
+  }
+
+  hasPendingHardwareRequests(): boolean {
+    const cfg = this.getConfig();
+    const hardwareDecisionEnabled =
+      cfg.hardware.enabled && cfg.hardware.decisionPushEnabled && this.hardware !== null;
+    if (!hardwareDecisionEnabled) return false;
+
+    for (const [requestId] of this.pendingMeta) {
+      if (this.queue.isWaiting(requestId)) return true;
+    }
+    return false;
   }
 
   resolveFromHardware(message: HardwareDecisionMessage): boolean {
@@ -311,10 +358,54 @@ export class DecisionService {
   private clearPending(requestId: string, sessionId?: string): void {
     this.pendingMeta.delete(requestId);
     this.hardwareResolvedRequestIds.delete(requestId);
+    this.hardwareRequestDelivered.delete(requestId);
     this.nonTimeoutResolvedRequestIds.delete(requestId);
     if (sessionId && this.sessionIndex.get(sessionId) === requestId) {
       this.sessionIndex.delete(sessionId);
     }
+  }
+
+  private pushHardwareRequest(
+    requestId: string,
+    body: DecisionWaitBody,
+    cfg: CombriefConfig,
+    decisionTimeoutMs = cfg.slack.decisionTimeoutMs,
+  ): void {
+    if (!this.hardware) {
+      return;
+    }
+
+    const hardwareRequest = buildHardwareRequest(
+      requestId,
+      body,
+      process.env.npm_package_version ?? '0.0.0',
+      decisionTimeoutMs,
+    );
+    appendDecisionLog(
+      cfg,
+      `request-send requestId=${requestId} app=${body.appId} tool=${body.toolName} kind=${hardwareRequest.kind} options=${hardwareRequest.options.length} brief=${JSON.stringify(hardwareRequest.brief)}`,
+    );
+    void this.hardware
+      .sendRequest(hardwareRequest)
+      .then(() => {
+        this.hardwareRequestDelivered.add(requestId);
+        appendDecisionLog(
+          cfg,
+          `request-sent requestId=${requestId} app=${body.appId} tool=${body.toolName}`,
+        );
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        appendDecisionLog(
+          cfg,
+          `request-failed requestId=${requestId} app=${body.appId} tool=${body.toolName} error=${JSON.stringify(message)}`,
+        );
+        console.warn('ComBrief Remote request push failed', {
+          requestId,
+          toolName: body.toolName,
+          error: message,
+        });
+      });
   }
 
   private sendHardwareResolved(

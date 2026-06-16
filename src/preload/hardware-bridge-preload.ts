@@ -1,5 +1,16 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { HARDWARE_BRIDGE_CHANNELS } from '../main/hardware/bridge-ipc';
+
+const HARDWARE_BRIDGE_CHANNELS = {
+  ready: 'hardwareBridge:ready',
+  startScan: 'hardwareBridge:startScan',
+  connect: 'hardwareBridge:connect',
+  disconnect: 'hardwareBridge:disconnect',
+  sendHostMessage: 'hardwareBridge:sendHostMessage',
+  hostMessageResult: 'hardwareBridge:hostMessageResult',
+  statusChanged: 'hardwareBridge:statusChanged',
+  deviceMessage: 'hardwareBridge:deviceMessage',
+  error: 'hardwareBridge:error',
+} as const;
 
 type BridgeHandler = (payload?: unknown) => void;
 
@@ -55,6 +66,11 @@ contextBridge.exposeInMainWorld('combriefHardwareBridge', {
   sendDeviceMessage: (message: unknown) => {
     if (isObject(message)) {
       ipcRenderer.send(HARDWARE_BRIDGE_CHANNELS.deviceMessage, message);
+    }
+  },
+  sendHostMessageResult: (result: unknown) => {
+    if (isObject(result)) {
+      ipcRenderer.send(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, result);
     }
   },
   sendError: (message: unknown) => {

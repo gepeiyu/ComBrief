@@ -34,9 +34,11 @@ void combrief_app_state_init(combrief_app_state_t *state)
     memset(state, 0, sizeof(*state));
     state->remote_state = COMBRIEF_REMOTE_DISCONNECTED;
     state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
-    state->battery_percent = 100;
+    state->battery_known = false;
+    state->battery_percent = 0;
     copy_bounded(state->app_version, sizeof(state->app_version), "0.1.0");
     copy_bounded(state->primary_status, sizeof(state->primary_status), "Disconnected");
+    state->app_summary[0] = '\0';
     state->last_resolved_result[0] = '\0';
 }
 
@@ -76,6 +78,7 @@ void combrief_app_state_set_ble_connected(combrief_app_state_t *state, bool conn
         state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
         state->full_page = 0;
         state->waiting_resolved = false;
+        state->app_summary[0] = '\0';
         copy_bounded(state->primary_status, sizeof(state->primary_status), "Ready");
     } else {
         combrief_app_state_clear_request(state);
@@ -91,13 +94,33 @@ void combrief_app_state_set_primary_status(combrief_app_state_t *state, const ch
     copy_bounded(state->primary_status, sizeof(state->primary_status), status);
 }
 
+void combrief_app_state_set_app_summary(combrief_app_state_t *state, const char *summary)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    copy_bounded(state->app_summary, sizeof(state->app_summary), summary);
+}
+
 void combrief_app_state_set_battery(combrief_app_state_t *state, uint8_t percent)
 {
     if (state == NULL) {
         return;
     }
 
+    state->battery_known = true;
     state->battery_percent = percent > 100 ? 100 : percent;
+}
+
+void combrief_app_state_set_battery_unknown(combrief_app_state_t *state)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    state->battery_known = false;
+    state->battery_percent = 0;
 }
 
 void combrief_app_state_clear_request(combrief_app_state_t *state)
@@ -116,6 +139,7 @@ void combrief_app_state_clear_request(combrief_app_state_t *state)
     state->waiting_resolved = false;
     state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
     state->remote_state = state->ble_connected ? COMBRIEF_REMOTE_IDLE : COMBRIEF_REMOTE_DISCONNECTED;
+    state->app_summary[0] = '\0';
     copy_bounded(state->primary_status, sizeof(state->primary_status), state->ble_connected ? "Ready" : "Disconnected");
 }
 
@@ -140,7 +164,7 @@ bool combrief_app_state_set_request(
     copy_bounded(state->brief, sizeof(state->brief), brief);
     copy_bounded(state->content, sizeof(state->content), content);
 
-    bounded_count = option_count > 8 ? 8 : option_count;
+    bounded_count = option_count > 3 ? 3 : option_count;
     for (i = 0; i < bounded_count; i++) {
         if (options != NULL) {
             copy_bounded(state->options[i].id, sizeof(state->options[i].id), options[i].id);
@@ -218,5 +242,4 @@ void combrief_app_state_mark_resolved(combrief_app_state_t *state, const char *r
 
     combrief_app_state_clear_request(state);
     copy_bounded(state->last_resolved_result, sizeof(state->last_resolved_result), result);
-    copy_bounded(state->primary_status, sizeof(state->primary_status), "Resolved");
 }

@@ -5,7 +5,7 @@ This guide records Task 11 manual validation for the ComBrief Remote HaaS EDU K1
 ## Current validation state and limitations
 
 - 当前仓库不编译 HaaS 固件；`npm test` and `npm run build` validate the desktop TypeScript app, renderer/preload wiring, Web Bluetooth bridge code, protocol constants, firmware structure, and static firmware module tests.
-- The firmware directory provides importable source, protocol/state-machine code, and placeholder peripheral adapters. BLE/OLED/input/LED/power 外设适配为 placeholder and must be mapped to real HaaS SDK APIs before claiming full device validation.
+- The firmware directory provides importable source, protocol/state-machine code, and HaaS EDU K1 board adapters for OLED, K1-K4 input, LED, BLE GATT server, and ADC battery reading. Full acceptance still requires real-device validation of BLE discovery/connection, notifications, physical input debounce, OLED layout, LED timing, and battery calibration.
 - Complete HaaS SDK 实机验证 still requires HaaS Studio / AliOS Things build, flash, serial logs, BLE pairing, OLED, K1-K4 input, LED, and power checks on the real HaaS EDU K1 board.
 - Disconnect 是临时断开 / stop runtime. It is not the same as disabling hardware and should not persist `hardware.enabled=false`.
 
@@ -29,16 +29,30 @@ Expected results:
 1. Open or install HaaS Studio with an AliOS Things SDK version that supports HaaS EDU K1.
 2. Copy or symlink `firmware/haas/combrief_remote` into the SDK as `solutions/combrief_remote`.
 3. Open the AliOS Things workspace in HaaS Studio and select `solutions/combrief_remote`.
-4. Replace or bridge the placeholder BLE/OLED/input/LED/power adapter functions with the SDK APIs for the target HaaS EDU K1 board.
-5. Build in the SDK environment using the board/profile required by that SDK version, for example:
+4. Confirm the OLED, K1-K4, and LED adapters compile with the target SDK; continue replacing or bridging BLE GATT server and power/battery adapter functions with the SDK APIs for the target HaaS EDU K1 board.
+5. Build in the SDK environment. The macOS flow verified on this machine is:
 
 ```bash
-aos make combrief_remote@haaseduk1 -c config
+cd /Users/silverwing/develop/alios_iot/solutions/combrief_remote
 aos make
 ```
 
-6. Connect the HaaS EDU K1 over USB, select the serial port in HaaS Studio, and 烧录 the firmware.
-7. Reboot the board and check serial logs for `ComBrief-Remote` boot, BLE advertising, service UUID, and `hello` send/receive activity.
+The build produces the main firmware at:
+
+```bash
+/Users/silverwing/develop/alios_iot/hardware/chip/haas1000/release/release_bin/ota_rtos.bin
+```
+
+6. Connect the HaaS EDU K1 over USB and confirm the serial port:
+
+```bash
+python3 -m serial.tools.list_ports
+```
+
+The verified device path on this machine is `/dev/cu.usbserial-AU03OSLJ`.
+
+7. Flash `ota_rtos.bin`. Prefer the stock HaaS SDK `flash_program.py` flow documented in `firmware/haas/combrief_remote/README.md`; on this machine it can reboot from `(ash)#`, enter `2ndboot`, download `ota_rtos.bin`, swap AB partition, and finish without a manual reset. Only press reset if the script fails to reach `2ndboot ver:` / `aos boot#` / `Downloading files...`. The successful flow prints `2ndboot ver`, `CCCC`, `Swap AB partition`, and `Burn "[...]" success`.
+8. Reboot or let the flash script reboot the board, then check serial logs for `OLED: Waiting BLE` and the red/green/blue advertising LED cycle.
 
 Passing this section requires a real HaaS SDK build and flash. Repository-only validation is not enough for full firmware acceptance.
 
@@ -47,8 +61,8 @@ Passing this section requires a real HaaS SDK build and flash. Repository-only v
 1. Start the ComBrief desktop app after `npm run build`, or use the normal app start flow.
 2. Open Settings and locate the ComBrief Remote / Hardware section.
 3. Click `Connect Remote` to open the Web Bluetooth pairing window button flow.
-4. Power or reset the HaaS EDU K1 and confirm the advertised device name is `ComBrief-Remote`.
-5. Select `ComBrief-Remote` in the pairing window and complete the connection.
+4. Power or reset the HaaS EDU K1 and confirm the advertised device name is `ComBrief`.
+5. Select `ComBrief` in the pairing window and complete the connection.
 6. Confirm the device sends a valid `hello` message and the desktop immediately sends the current `state` snapshot back to the remote.
 7. Confirm OLED shows the current ComBrief app state rather than remaining blank or stale after pairing.
 
@@ -78,5 +92,5 @@ Validate that only one path wins for the same decision request:
 ## Known limitations / manual validation state
 
 - This repository currently validates source structure and desktop behavior, not HaaS SDK compilation.
-- BLE GATT, OLED drawing, physical input debounce, LED patterns, and power readings remain placeholder adapter responsibilities until real HaaS APIs are wired.
-- HaaS Studio build, 烧录, serial logs, BLE pairing, `ComBrief-Remote` discovery, K1/K2/K3/K4 input, `resolved` display, Slack race behavior, and Disconnect temporary-stop semantics must be checked manually on hardware before marking the remote fully validated.
+- OLED/K1-K4/LED/BLE GATT/ADC battery 已接入 HaaS EDU K1 API；OLED drawing, BLE discovery/connection, notification subscription, physical input debounce, LED patterns, and battery calibration still require hardware confirmation.
+- HaaS Studio build, 烧录, serial logs, BLE pairing, `ComBrief` discovery, K1/K2/K3/K4 input, `resolved` display, Slack race behavior, and Disconnect temporary-stop semantics must be checked manually on hardware before marking the remote fully validated.

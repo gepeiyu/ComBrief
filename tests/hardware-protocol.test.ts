@@ -33,7 +33,7 @@ void (0 as unknown as _RequestOptionsOmitDetails);
 
 describe('hardware protocol', () => {
   it('uses the finalized ComBrief Remote name and service UUID', () => {
-    expect(COMBRIEF_REMOTE_NAME).toBe('ComBrief-Remote');
+    expect(COMBRIEF_REMOTE_NAME).toBe('ComBrief');
     expect(COMBRIEF_REMOTE_SERVICE_UUID).toBe(
       '7b5c0001-8d4a-4c3a-9b4f-434252465001',
     );
@@ -56,10 +56,10 @@ describe('hardware protocol', () => {
 
   it('defines finalized hardware protocol limits', () => {
     expect(hardwareProtocolLimits).toEqual({
-      maxBriefLen: 64,
-      maxContentLen: 1024,
-      maxOptions: 8,
-      maxOptionLabelLen: 24,
+      maxBriefLen: 48,
+      maxContentLen: 80,
+      maxOptions: 3,
+      maxOptionLabelLen: 12,
     });
   });
 
@@ -115,7 +115,7 @@ describe('hardware protocol', () => {
       isHardwareHelloMessage({
         protocol: 1,
         type: 'hello',
-        deviceName: 'ComBrief-Remote',
+        deviceName: 'ComBrief',
         platform: 'haas-edu-k1',
         fwVersion: '0.1.0',
         battery: 78,
@@ -137,7 +137,7 @@ describe('hardware protocol', () => {
       isHardwareHelloMessage({
         protocol: 2,
         type: 'hello',
-        deviceName: 'ComBrief-Remote',
+        deviceName: 'ComBrief',
         platform: 'haas-edu-k1',
         fwVersion: '0.1.0',
       }),
@@ -146,7 +146,7 @@ describe('hardware protocol', () => {
       isHardwareHelloMessage({
         protocol: 1,
         type: 'hello',
-        deviceName: 'ComBrief-Remote',
+        deviceName: 'ComBrief',
         platform: 'haas-edu-k1',
         fwVersion: '0.1.0',
         battery: Number.NaN,
@@ -246,7 +246,7 @@ describe('hardware protocol', () => {
       {
         protocol: 1,
         type: 'hello',
-        deviceName: 'ComBrief-Remote',
+        deviceName: 'ComBrief',
         platform: 'haas-edu-k1',
         fwVersion: '0.1.0',
         battery: 78,

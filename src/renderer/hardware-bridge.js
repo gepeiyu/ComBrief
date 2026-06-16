@@ -1,13 +1,29 @@
 const SERVICE_UUID = '7b5c0001-8d4a-4c3a-9b4f-434252465001';
 const HOST_TX_UUID = '7b5c0002-8d4a-4c3a-9b4f-434252465001';
 const DEVICE_TX_UUID = '7b5c0003-8d4a-4c3a-9b4f-434252465001';
-const REMOTE_NAME = 'ComBrief-Remote';
-const BRIDGE_V1_SINGLE_FRAME_MAX_BYTES = 1400;
+const REMOTE_NAME = 'ComBrief';
+const BRIDGE_V1_SINGLE_FRAME_MAX_BYTES = 500;
+const BLE_WRITE_CHUNK_BYTES = 20;
+const BLE_CHUNK_PAYLOAD_BYTES = BLE_WRITE_CHUNK_BYTES - 1;
+const BLE_CHUNK_DELAY_MS = 12;
 const MAX_HOST_MESSAGE_BYTES = BRIDGE_V1_SINGLE_FRAME_MAX_BYTES;
 
 const bridge = window.combriefHardwareBridge;
+const bridgeTitle = document.getElementById('bridge-title');
+const bridgeDescription = document.getElementById('bridge-description');
 const connectButton = document.getElementById('connect-button');
 const bridgeStatus = document.getElementById('bridge-status');
+const copyParams = new URLSearchParams(window.location?.search || '');
+const copy = {
+  title: copyParams.get('title') || 'Pair ComBrief Remote',
+  description: copyParams.get('description') || 'Click the button below, then choose your ComBrief Remote in the Bluetooth picker.',
+  button: copyParams.get('button') || 'Connect ComBrief Remote',
+  initialStatus: copyParams.get('initialStatus') || 'Waiting for your click to start Bluetooth pairing.',
+  scanningStatus: copyParams.get('scanningStatus') || 'Scanning for ComBrief Remote…',
+  connectingStatus: copyParams.get('connectingStatus') || 'Device selected. Connecting to ComBrief Remote…',
+  connectedStatus: copyParams.get('connectedStatus') || 'Connected. You can leave this window open.',
+  errorPrefix: copyParams.get('errorPrefix') || 'Connection failed: ',
+};
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -28,6 +44,13 @@ let connectionEpoch = 0;
 let notificationListener = null;
 let disconnectListenerDevice = null;
 let disconnectListener = null;
+let hostSendChain = Promise.resolve();
+
+function applyBridgeCopy(key, element) {
+  if (element) {
+    element.textContent = copy[key];
+  }
+}
 
 function updateStatusText(message) {
   if (bridgeStatus) {
@@ -43,8 +66,16 @@ function sendStatus(patch = {}) {
   bridge?.sendStatus({ ...status });
 }
 
+function errorMessage(error) {
+  if (error && typeof error === 'object' && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+}
+
 function reportError(error) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
+  updateStatusText(`${copy.errorPrefix}${message}`);
   sendStatus({ lastError: message, scanning: false });
   bridge?.sendError(message);
 }
@@ -127,6 +158,11 @@ function resetConnectionState() {
   service = null;
   hostTxCharacteristic = null;
   deviceTxCharacteristic = null;
+  hostSendChain = Promise.resolve();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function handleDisconnectedFor(activeEpoch, sourceDevice, resources) {
@@ -170,11 +206,12 @@ async function connectOnce(activeEpoch) {
     }
 
     sendStatus({ scanning: true, lastError: null });
-    updateStatusText('Opening Bluetooth picker...');
+    updateStatusText(copy.scanningStatus);
     resources.localDevice = await navigator.bluetooth.requestDevice({
-      filters: [{ name: REMOTE_NAME, services: [SERVICE_UUID] }],
+      filters: [{ namePrefix: REMOTE_NAME }],
       optionalServices: [SERVICE_UUID],
     });
+    updateStatusText(copy.connectingStatus);
     if (abortStaleConnection(activeEpoch, resources)) return;
 
     resources.localDisconnectListenerDevice = resources.localDevice;
@@ -202,7 +239,7 @@ async function connectOnce(activeEpoch) {
     if (abortStaleConnection(activeEpoch, resources)) return;
 
     publishConnectionResources(resources);
-    updateStatusText(`Connected to ${resources.localDevice.name || REMOTE_NAME}. You can leave this window open.`);
+    updateStatusText(`${resources.localDevice.name || REMOTE_NAME}: ${copy.connectedStatus}`);
     sendStatus({
       connected: true,
       scanning: false,
@@ -256,9 +293,50 @@ function disconnect() {
   }
 }
 
-async function sendHostMessage(message) {
+async function writeConfirmedBytes(bytes) {
+  if (typeof hostTxCharacteristic.writeValueWithResponse === 'function') {
+    await hostTxCharacteristic.writeValueWithResponse(bytes);
+    return;
+  }
+
+  if (typeof hostTxCharacteristic.writeValue === 'function') {
+    await hostTxCharacteristic.writeValue(bytes);
+    return;
+  }
+
+  throw new Error('ComBrief Remote host characteristic does not support confirmed writes');
+}
+
+async function writeHostBytes(bytes) {
+  for (let offset = 0; offset < bytes.byteLength; offset += BLE_CHUNK_PAYLOAD_BYTES) {
+    const end = Math.min(offset + BLE_CHUNK_PAYLOAD_BYTES, bytes.byteLength);
+    const prefix = end >= bytes.byteLength ? '!'.charCodeAt(0) : '>'.charCodeAt(0);
+    const chunk = new Uint8Array(1 + end - offset);
+    chunk[0] = prefix;
+    chunk.set(bytes.slice(offset, end), 1);
+    await writeConfirmedBytes(chunk);
+    if (end < bytes.byteLength) {
+      await delay(BLE_CHUNK_DELAY_MS);
+    }
+  }
+}
+
+async function sendHostMessageInner(command) {
+  const message = command && typeof command === 'object' && 'message' in command
+    ? command.message
+    : command;
+  const commandId = command && typeof command === 'object' && typeof command.id === 'string'
+    ? command.id
+    : null;
+
   try {
     if (!hostTxCharacteristic || !status.connected) {
+      if (status.scanning) {
+        if (commandId) {
+          bridge?.sendHostMessageResult?.({ id: commandId, ok: true, error: null });
+        }
+        return;
+      }
       throw new Error('ComBrief Remote is not connected');
     }
 
@@ -267,21 +345,36 @@ async function sendHostMessage(message) {
       throw new Error(`Host message exceeds v1 single-frame limit: ${bytes.byteLength} bytes`);
     }
 
-    if (typeof hostTxCharacteristic.writeValueWithoutResponse === 'function') {
-      await hostTxCharacteristic.writeValueWithoutResponse(bytes);
-    } else {
-      await hostTxCharacteristic.writeValue(bytes);
+    await writeHostBytes(bytes);
+    if (commandId) {
+      bridge?.sendHostMessageResult?.({ id: commandId, ok: true, error: null });
     }
   } catch (error) {
+    if (commandId) {
+      const message = errorMessage(error);
+      bridge?.sendHostMessageResult?.({ id: commandId, ok: false, error: message });
+    }
     reportError(error);
   }
 }
 
+function enqueueHostMessage(command) {
+  const task = hostSendChain.then(() => sendHostMessageInner(command));
+  hostSendChain = task.catch(() => undefined);
+  return task;
+}
+
+applyBridgeCopy('title', bridgeTitle);
+applyBridgeCopy('description', bridgeDescription);
+applyBridgeCopy('button', connectButton);
+applyBridgeCopy('initialStatus', bridgeStatus);
+
 window.combriefHardwareBridge?.onStartScan(() => {
-  updateStatusText('Click Connect ComBrief Remote to start Bluetooth pairing.');
+  updateStatusText(copy.initialStatus);
 });
 window.combriefHardwareBridge?.onConnect(() => {
-  updateStatusText('Click Connect ComBrief Remote to start Bluetooth pairing.');
+  updateStatusText(copy.initialStatus);
+  void connect();
 });
 connectButton?.addEventListener('click', () => {
   void connect();
@@ -290,7 +383,7 @@ window.combriefHardwareBridge?.onDisconnect(() => {
   disconnect();
 });
 window.combriefHardwareBridge?.onSendHostMessage((message) => {
-  void sendHostMessage(message);
+  void enqueueHostMessage(message);
 });
 
 window.combriefHardwareBridge?.sendReady?.();
