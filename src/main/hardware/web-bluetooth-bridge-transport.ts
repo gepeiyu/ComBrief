@@ -44,10 +44,19 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
   private readonly messageHandlers = new Set<(message: HardwareDeviceMessage) => void>();
   private readonly pendingHostMessages = new Map<
     string,
-    { resolve: () => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }
+    {
+      resolve: () => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout | null;
+      ackRequired: boolean;
+      ackReceived: boolean;
+      ackOk: boolean;
+      ackError?: string;
+    }
   >();
   private subscribed = false;
   private startGeneration = 0;
+  private nextHostMessageSeq = 1;
 
   private readonly statusChangedListener: BridgeIpcListener = (event, payload) => {
     if (!this.isBridgeSender(event) || !isHardwareBridgeStatus(payload)) {
@@ -91,10 +100,34 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
     }
 
     if (payload.ok) {
+      if (!pending.ackRequired) {
+        this.pendingHostMessages.delete(payload.id);
+        pending.resolve();
+        return;
+      }
+      if (pending.ackReceived) {
+        this.pendingHostMessages.delete(payload.id);
+        if (pending.ackOk) {
+          pending.resolve();
+        } else {
+          const message = pending.ackError || 'ComBrief Remote rejected host message';
+          this.status = { ...this.status, lastError: message };
+          pending.reject(new Error(message));
+        }
+        return;
+      }
+      pending.timeout = setTimeout(() => {
+        this.pendingHostMessages.delete(payload.id);
+        const error = new Error('ComBrief Remote bridge did not confirm host message write');
+        this.status = { ...this.status, lastError: error.message };
+        pending.reject(error);
+      }, HOST_MESSAGE_ACK_BASE_MS);
       return;
     }
 
-    clearTimeout(pending.timeout);
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+    }
     this.pendingHostMessages.delete(payload.id);
     const message = payload.error || 'ComBrief Remote host message write failed';
     this.status = { ...this.status, lastError: message };
@@ -202,22 +235,35 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
       throw new Error('ComBrief Remote bridge is not running');
     }
 
-    const id = `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const messageWithAckId: HardwareHostMessage = { ...message, hostMessageId: id };
+    const id = `h${this.nextHostMessageSeq}`;
+    this.nextHostMessageSeq = this.nextHostMessageSeq >= 999999 ? 1 : this.nextHostMessageSeq + 1;
+    const ackRequired = message.type !== 'state';
+    const messageWithAckId: HardwareHostMessage = ackRequired ? { ...message, hostMessageId: id } : message;
+
+    if (!ackRequired) {
+      bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, {
+        id,
+        message: messageWithAckId,
+      });
+      return;
+    }
+
     const result = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingHostMessages.delete(id);
-        const error = new Error('ComBrief Remote bridge did not confirm host message write');
-        this.status = { ...this.status, lastError: error.message };
-        reject(error);
-      }, hostMessageAckTimeoutMs(message));
-      this.pendingHostMessages.set(id, { resolve, reject, timeout });
+      this.pendingHostMessages.set(id, {
+        resolve,
+        reject,
+        timeout: null,
+        ackRequired,
+        ackReceived: false,
+        ackOk: false,
+      });
     });
 
     bridgeWindow.webContents.send(HARDWARE_BRIDGE_CHANNELS.sendHostMessage, {
       id,
       message: messageWithAckId,
     });
+
     return result;
   }
 
@@ -249,7 +295,9 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
 
   private clearPendingHostMessages(reason: string): void {
     for (const [id, pending] of this.pendingHostMessages) {
-      clearTimeout(pending.timeout);
+      if (pending.timeout) {
+        clearTimeout(pending.timeout);
+      }
       pending.reject(new Error(reason));
       this.pendingHostMessages.delete(id);
     }
@@ -258,6 +306,13 @@ export class WebBluetoothBridgeTransport implements HardwareTransport {
   private resolveHostAck(id: string, ok: boolean, error: string | undefined): void {
     const pending = this.pendingHostMessages.get(id);
     if (!pending) {
+      return;
+    }
+
+    if (pending.timeout === null) {
+      pending.ackReceived = true;
+      pending.ackOk = ok;
+      pending.ackError = error;
       return;
     }
 

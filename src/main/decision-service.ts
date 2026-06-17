@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
+import { getAppDefinition } from './apps/registry';
 import {
   combriefHome,
   resolveEventLoggingEnabled,
@@ -159,6 +160,7 @@ export class DecisionService {
 
       if (result.hookStdout === null && cfg.slack.failClosed) {
         const deny = buildHookStdout({
+          appId: body.appId,
           hookEvent: body.hookEvent,
           toolName: body.toolName,
           toolInput: body.toolInput,
@@ -212,6 +214,7 @@ export class DecisionService {
     if (!action) return false;
 
     const hookStdout = buildHookStdout({
+      appId: pending.body.appId,
       hookEvent: pending.body.hookEvent,
       toolName: pending.body.toolName,
       toolInput: pending.body.toolInput,
@@ -328,6 +331,7 @@ export class DecisionService {
 
     const action = this.toDecisionAction(parsed, meta.body);
     const hookStdout = buildHookStdout({
+      appId: meta.body.appId,
       hookEvent: meta.body.hookEvent,
       toolName: meta.body.toolName,
       toolInput: meta.body.toolInput,
@@ -520,6 +524,13 @@ export class DecisionService {
     );
   }
 
+  private slackTitleForApp(appId: string): string {
+    const base = this.getCardLabels().slackCardTitle;
+    const displayName = getAppDefinition(appId).displayName;
+    if (appId === 'claude-code') return base;
+    return base.replace(/Claude Code/g, displayName);
+  }
+
   private cardInput(
     requestId: string,
     body: DecisionWaitBody,
@@ -542,7 +553,6 @@ export class DecisionService {
     const sessionLabel = (body.sessionId ?? 'unknown').slice(-6);
     const cwdLabel = body.cwd ? basename(body.cwd) : '—';
     const summary = formatToolSummary(body.toolName, body.toolInput);
-    const labels = this.getCardLabels();
 
     const permissionButtons =
       mode === 'permission' && body.hookEvent === 'permissionRequest'
@@ -551,7 +561,7 @@ export class DecisionService {
 
     return {
       requestId,
-      title: labels.slackCardTitle,
+      title: this.slackTitleForApp(body.appId),
       toolName: body.toolName,
       cwdLabel,
       sessionLabel,
@@ -653,7 +663,6 @@ export class DecisionService {
     if (!snapshot || !resolvedChannelId || !resolvedTs) return;
 
     const statusText = this.resolutionStatusText(resolution);
-    const labels = this.getCardLabels();
     const resolvedInput: DecisionBlockInput = {
       ...snapshot.input,
       timeFooter: this.resolvedTimeFooter(
@@ -666,7 +675,7 @@ export class DecisionService {
       await this.slack.updateDecisionMessage({
         channelId: resolvedChannelId,
         ts: resolvedTs,
-        text: `${labels.slackCardTitle}: ${snapshot.toolName} — ${statusText}`,
+        text: `${snapshot.input.title}: ${snapshot.toolName} — ${statusText}`,
         blocks: buildResolvedDecisionBlocks(resolvedInput, statusText),
       });
       this.cardSnapshots.delete(requestId);
@@ -680,11 +689,10 @@ export class DecisionService {
 
     const requestedAtMs = Date.now();
     const input = this.cardInput(requestId, body, requestedAtMs);
-    const labels = this.getCardLabels();
     const cfg = this.getConfig();
 
     const ts = await this.slack.postDecisionMessage({
-      text: `${labels.slackCardTitle}: ${body.toolName}`,
+      text: `${input.title}: ${body.toolName}`,
       blocks: buildDecisionBlocks(input),
     });
     this.cardSnapshots.set(requestId, {

@@ -730,6 +730,48 @@ int main(void)
     expect(output).not.toContain('K1/K3 Summary');
   });
 
+  it('wraps a long single-line detail and prevents scrolling into an empty page', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "display.h"
+#include "input.h"
+
+static bool capture_send(const char *json)
+{
+    (void)json;
+    return true;
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    combrief_option_t options[1];
+    memset(options, 0, sizeof(options));
+    snprintf(options[0].id, sizeof(options[0].id), "%s", "ok");
+    snprintf(options[0].label, sizeof(options[0].label), "%s", "OK");
+
+    app_state_init();
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    (void)combrief_app_state_set_request(state, "req-1", "Need approval", "abcdefghijklmnopQRSTUVWXYZ0123456789", options, 1);
+    (void)combrief_input_handle_key(state, COMBRIEF_KEY_K3, capture_send);
+    display_render();
+    (void)combrief_input_handle_key(state, COMBRIEF_KEY_K4, capture_send);
+    display_render();
+    (void)combrief_input_handle_key(state, COMBRIEF_KEY_K4, capture_send);
+    display_render();
+    return 0;
+}
+`, ['app_state', 'display', 'input', 'protocol']);
+
+    expect(output).toContain('OLED: Detail abcdefghijklmnop | QRSTUVWXYZ012345 | 6789');
+    expect(output).not.toContain('OLED: Detail  |  |  |  |');
+  });
+
   it('confirms the currently selected option from detail mode with K1', () => {
     const output = compileAndRunFirmwareHarness(String.raw`
 #include <stdbool.h>
@@ -781,8 +823,9 @@ int main(void)
     check_bool("K4 selects second", combrief_input_handle_key(state, COMBRIEF_KEY_K4, capture_send), true);
     check_bool("K3 enters detail", combrief_input_handle_key(state, COMBRIEF_KEY_K3, capture_send), true);
     check_bool("K1 confirms from detail", combrief_input_handle_key(state, COMBRIEF_KEY_K1, capture_send), true);
-    check_contains("selected second option", sent_json, "\"optionId\":\"deny\"");
+    check_contains("selected second option", sent_json, "D:1");
     check_bool("waiting resolved", state->waiting_resolved, true);
+    check_bool("returns summary after K1", state->display_mode == COMBRIEF_DISPLAY_SUMMARY, true);
 
     if (failures != 0) {
         return 1;
@@ -946,7 +989,7 @@ static int send_count = 0;
 
 static bool capture_send(const char *json)
 {
-    if (json == NULL || strstr(json, "\"type\":\"decision\"") == NULL) {
+    if (json == NULL || strcmp(json, "D:0") != 0) {
         printf("FAIL send payload %s\n", json == NULL ? "null" : json);
         failures++;
         return false;
@@ -967,6 +1010,14 @@ static void check_int(const char *name, int actual, int expected)
 {
     if (actual != expected) {
         printf("FAIL %s expected %d got %d\n", name, expected, actual);
+        failures++;
+    }
+}
+
+static void check_string(const char *name, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected %s got %s\n", name, expected, actual);
         failures++;
     }
 }
@@ -992,6 +1043,13 @@ int main(void)
     check_bool("first K1 sends decision", combrief_input_handle_key(&state, COMBRIEF_KEY_K1, capture_send), true);
     check_int("sent once", send_count, 1);
     check_bool("waiting resolved marked", state.waiting_resolved, true);
+    check_int("K1 stays summary", (int)state.display_mode, (int)COMBRIEF_DISPLAY_SUMMARY);
+    check_int("waiting resolved state", (int)state.remote_state, (int)COMBRIEF_REMOTE_WAITING_RESOLVED);
+    check_string("decision id retained for resolved", state.decision_id, "req-1");
+    check_string("brief cleared after send", state.brief, "");
+    check_string("content cleared after send", state.content, "");
+    check_int("options cleared after send", (int)state.option_count, 0);
+    check_int("selected option reset after send", (int)state.selected_option, 0);
 
     check_bool("second K1 blocked", combrief_input_handle_key(&state, COMBRIEF_KEY_K1, capture_send), false);
     check_int("still sent once", send_count, 1);
@@ -1227,6 +1285,15 @@ int main(void)
     expect(hostWrite.match(/ComBrief BLE notify characteristic=/g)?.length).toBe(1);
   });
 
+  it('chunks device notifications that exceed the BLE notify payload size', () => {
+    const source = expectFile('ble_service/ble_service.c');
+
+    expect(source).toContain('COMBRIEF_BLE_NOTIFY_SINGLE_MAX_LEN 20');
+    expect(source).toContain('COMBRIEF_BLE_NOTIFY_CHUNK_PAYLOAD_LEN 19');
+    expect(source).toContain("chunk[0] = offset + part >= payload_len ? '!' : '>';");
+    expect(source).toContain('ble_service_notify_bytes(chunk, part + 1)');
+  });
+
   it('applies fast status writes without waiting for full host JSON', () => {
     const output = compileAndRunFirmwareHarness(String.raw`
 #include <stdio.h>
@@ -1391,6 +1458,199 @@ int main(void)
     check_str("not applied before final chunk", state->primary_status, "Ready");
     check_bool("final chunk applies", ble_service_handle_host_write("!pe\":\"state\",\"primary\":\"working\"}"), true);
     check_str("applied after final chunk", state->primary_status, "working");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
+  it('reassembles sequenced v2 BLE host write chunks before applying host JSON', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+
+static int failures;
+
+static void check_bool(const char *label, bool actual, bool expected)
+{
+    if (actual != expected) {
+        printf("FAIL %s expected=%d actual=%d\n", label, expected ? 1 : 0, actual ? 1 : 0);
+        failures++;
+    }
+}
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+
+    check_bool("v2 first chunk pending", ble_service_handle_host_write("@010004{\"protocol\":1"), true);
+    check_bool("v2 second chunk pending", ble_service_handle_host_write("@010104,\"type\":\"sta"), true);
+    check_str("v2 not applied before final", state->primary_status, "Ready");
+    check_bool("v2 third chunk pending", ble_service_handle_host_write("@010204te\",\"primary\""), true);
+    check_bool("v2 final chunk applies", ble_service_handle_host_write("@010304:\"working\"}"), true);
+    check_str("v2 applied after final", state->primary_status, "working");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
+  it('drops invalid v2 BLE host write sequences before applying host JSON', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+
+static int failures;
+
+static void check_bool(const char *label, bool actual, bool expected)
+{
+    if (actual != expected) {
+        printf("FAIL %s expected=%d actual=%d\n", label, expected ? 1 : 0, actual ? 1 : 0);
+        failures++;
+    }
+}
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+
+    check_bool("out of order rejected", ble_service_handle_host_write("@020102,\"type\":\"state\"}"), false);
+    check_str("out of order not applied", state->primary_status, "Ready");
+    check_bool("valid first after reject", ble_service_handle_host_write("@030002{\"protocol\":1"), true);
+    check_bool("wrong seq rejected", ble_service_handle_host_write("@040102,\"type\":\"state\",\"primary\":\"working\"}"), false);
+    check_str("wrong seq not applied", state->primary_status, "Ready");
+    check_bool("restart valid first", ble_service_handle_host_write("@050004{\"protocol\":1"), true);
+    check_bool("restart valid second", ble_service_handle_host_write("@050104,\"type\":\"sta"), true);
+    check_bool("restart valid third", ble_service_handle_host_write("@050204te\",\"primary\""), true);
+    check_bool("restart valid final", ble_service_handle_host_write("@050304:\"idle\"}"), true);
+    check_str("valid after reject applied", state->primary_status, "idle");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
+  it('reassembles large BLE host write chunks before applying request JSON', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+
+static int failures;
+
+static void check_bool(const char *label, bool actual, bool expected)
+{
+    if (actual != expected) {
+        printf("FAIL %s expected=%d actual=%d\n", label, expected ? 1 : 0, actual ? 1 : 0);
+        failures++;
+    }
+}
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+static void send_chunked(const char *json)
+{
+    char chunk[20];
+    size_t len = strlen(json);
+    size_t offset = 0;
+
+    while (offset < len) {
+        size_t part = len - offset;
+        if (part > 18) {
+            part = 18;
+        }
+        chunk[0] = offset + part >= len ? '!' : '>';
+        memcpy(chunk + 1, json + offset, part);
+        chunk[part + 1] = '\0';
+        if (!ble_service_handle_host_write(chunk)) {
+            printf("FAIL chunk offset=%u\n", (unsigned int)offset);
+            failures++;
+            return;
+        }
+        offset += part;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    const char *json = "{\"protocol\":1,\"type\":\"request\",\"hostMessageId\":\"host-large-request\",\"appName\":\"ComBrief\",\"appVersion\":\"0.1.3\",\"decisionId\":\"large-request-1234567890\",\"source\":\"combrief-test\",\"sourceLabel\":\"Bash\",\"kind\":\"PERMISSION\",\"brief\":\"Do you want to proceed?\",\"content\":\"Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command Bash command\",\"options\":[{\"id\":\"yes\",\"label\":\"Yes\"},{\"id\":\"always\",\"label\":\"Always Allow\"},{\"id\":\"no\",\"label\":\"No\"}],\"defaultFocus\":\"yes\",\"expiresAt\":1234567890}";
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    combrief_app_state_apply_fast_status(state, "Bash", "waiting_user");
+    check_bool("waiting before request", state->waiting_request_content, true);
+    check_bool("large json over old buffer", strlen(json) > 512, true);
+
+    send_chunked(json);
+
+    check_bool("request active", state->remote_state == COMBRIEF_REMOTE_REQUEST_ACTIVE, true);
+    check_bool("waiting cleared", state->waiting_request_content, false);
+    check_str("decision", state->decision_id, "large-request-1234567890");
+    check_str("brief", state->brief, "Do you want to proceed?");
+    check_str("first option", state->options[0].label, "Yes");
+    check_str("second option", state->options[1].label, "Always Allow");
+    check_str("third option", state->options[2].label, "No");
 
     if (failures != 0) {
         return 1;

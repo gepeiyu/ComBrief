@@ -59,6 +59,7 @@ describe('AppController hardware snapshots', () => {
       protocol: 1,
       type: 'state',
       primary: 'cursor',
+      primaryLabel: 'C',
       primaryStatus: 'waiting_user',
       appSummary: 'CC [WORK]\nC [ASK]',
     });

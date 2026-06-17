@@ -348,7 +348,42 @@ describe('WebBluetoothBridgeTransport', () => {
     );
   });
 
-  it('adds a host message id and resolves only after the device ACKs the write', async () => {
+  it('registers reliable host ACK tracking before sending to avoid fast ACK races', async () => {
+    const harness = createHarness();
+    const message = {
+      ...hostMessage(),
+      type: 'request' as const,
+      decisionId: 'request-fast-ack',
+      source: 'claude-code',
+      sourceLabel: 'CC',
+      kind: 'PERMISSION' as const,
+      brief: 'Allow command?',
+      content: 'Run a command',
+      options: [{ id: 'allow', label: 'Allow' }],
+      defaultFocus: 'allow',
+    };
+
+    await harness.transport.start();
+    const originalSend = harness.window?.webContents.send;
+    originalSend?.mockImplementationOnce((_channel: string, payload: { id: string }) => {
+      harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
+        protocol: 1,
+        type: 'ack',
+        hostMessageId: payload.id,
+        ok: true,
+        ts: 1_710_000_000_010,
+      });
+      harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+        id: payload.id,
+        ok: true,
+        error: null,
+      });
+    });
+
+    await expect(harness.transport.send(message)).resolves.toBeUndefined();
+  });
+
+  it('resolves state host messages after the bridge write without waiting for a device ACK', async () => {
     const harness = createHarness();
     const message = hostMessage();
 
@@ -359,13 +394,54 @@ describe('WebBluetoothBridgeTransport', () => {
       message: HardwareHostMessage & { hostMessageId?: string };
     };
 
-    expect(payload.message.hostMessageId).toBe(payload.id);
+    expect(payload.message.hostMessageId).toBeUndefined();
 
     harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
       id: payload.id,
       ok: true,
       error: null,
     });
+
+    await expect(sendPromise).resolves.toBeUndefined();
+  });
+
+  it('adds a host message id and resolves only after the device ACKs the write', async () => {
+    const harness = createHarness();
+    const message = {
+      ...hostMessage(),
+      type: 'request' as const,
+      decisionId: 'request-1',
+      source: 'claude-code',
+      sourceLabel: 'CC',
+      kind: 'PERMISSION' as const,
+      brief: 'Allow command?',
+      content: 'Run a command',
+      options: [{ id: 'allow', label: 'Allow' }],
+      defaultFocus: 'allow',
+    };
+
+    await harness.transport.start();
+    const sendPromise = harness.transport.send(message);
+    const payload = harness.window?.webContents.send.mock.calls.at(-1)?.[1] as {
+      id: string;
+      message: HardwareHostMessage & { hostMessageId?: string };
+    };
+
+    expect(payload.message.hostMessageId).toBe(payload.id);
+    expect(payload.id).toMatch(/^h\d+$/);
+    expect(payload.id.length).toBeLessThanOrEqual(8);
+
+    harness.emit(HARDWARE_BRIDGE_CHANNELS.hostMessageResult, {
+      id: payload.id,
+      ok: true,
+      error: null,
+    });
+
+    await expect(Promise.race([
+      sendPromise.then(() => 'resolved'),
+      Promise.resolve('pending'),
+    ])).resolves.toBe('pending');
+
     harness.emit(HARDWARE_BRIDGE_CHANNELS.deviceMessage, {
       protocol: 1,
       type: 'ack',
@@ -377,9 +453,20 @@ describe('WebBluetoothBridgeTransport', () => {
     await expect(sendPromise).resolves.toBeUndefined();
   });
 
-  it('rejects host sends when the bridge reports a matching write error', async () => {
+  it('rejects reliable host sends when the bridge reports a matching write error', async () => {
     const harness = createHarness();
-    const message = hostMessage();
+    const message = {
+      ...hostMessage(),
+      type: 'request' as const,
+      decisionId: 'request-error-1',
+      source: 'claude-code',
+      sourceLabel: 'CC',
+      kind: 'PERMISSION' as const,
+      brief: 'Allow command?',
+      content: 'Run a command',
+      options: [{ id: 'allow', label: 'Allow' }],
+      defaultFocus: 'allow',
+    };
 
     await harness.transport.start();
     const sendPromise = harness.transport.send(message);

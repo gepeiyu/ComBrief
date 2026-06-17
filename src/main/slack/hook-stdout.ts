@@ -8,6 +8,7 @@ export type DecisionAction =
   | { kind: 'option'; optionLabel: string };
 
 export interface BuildHookStdoutInput {
+  appId?: string;
   hookEvent: 'permissionRequest' | 'preToolUse';
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -38,8 +39,21 @@ function isAllowAction(action: DecisionAction): boolean {
   );
 }
 
+function buildCursorHookStdout(action: DecisionAction): string {
+  const permission = isAllowAction(action) ? 'allow' : 'deny';
+  const out: Record<string, unknown> = { permission };
+  if (permission === 'deny' && action.kind === 'deny' && action.reason) {
+    out.user_message = action.reason;
+  }
+  return JSON.stringify(out);
+}
+
 export function buildHookStdout(input: BuildHookStdoutInput): string {
-  const { hookEvent, toolName, toolInput, action } = input;
+  const { appId, hookEvent, toolName, toolInput, action } = input;
+
+  if (appId === 'cursor') {
+    return buildCursorHookStdout(action);
+  }
 
   if (toolName === 'AskUserQuestion' && action.kind === 'option') {
     const updatedInput = {

@@ -107,7 +107,7 @@ export class HardwareRuntime {
     const summaryLine = message.appSummary?.split('\n').find((line) => line.trim().length > 0);
     return {
       seq: this.nextFastStateSeq(),
-      label: primary?.label ?? summaryLine?.split(' ')[0] ?? 'CB',
+      label: message.primaryLabel ?? primary?.label ?? summaryLine?.split(' ')[0] ?? 'CB',
       status: message.primaryStatus ?? primary?.status ?? 'idle',
     };
   }

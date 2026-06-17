@@ -156,22 +156,14 @@ int main(void)
     check_contains("hello host ack capability", payload, "\"hostAck\":true");
     check_contains("hello unconfirmed write capability", payload, "\"unconfirmedWrites\":true");
 
-    check_bool("host ACK payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "host-1", true, NULL), true);
-    check_contains("ack protocol", payload, "\"protocol\":1");
-    check_contains("ack type", payload, "\"type\":\"ack\"");
-    check_contains("ack id", payload, "\"hostMessageId\":\"host-1\"");
-    check_contains("ack ok", payload, "\"ok\":true");
+    check_bool("host ACK payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "h1", true, NULL), true);
+    check_contains("ack short frame", payload, "A:h1");
     check_bool("host ACK requires id", combrief_protocol_build_host_ack(payload, sizeof(payload), "", true, NULL), false);
-    check_bool("host ACK error payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "host-2", false, "parse failed"), true);
-    check_contains("ack false", payload, "\"ok\":false");
-    check_contains("ack error", payload, "\"error\":\"parse failed\"");
+    check_bool("host ACK error payload builds", combrief_protocol_build_host_ack(payload, sizeof(payload), "h2", false, "parse failed"), true);
+    check_contains("ack error short frame", payload, "E:h2");
 
     check_bool("decision payload builds", combrief_protocol_build_decision(payload, sizeof(payload), &state), true);
-    check_contains("decision protocol", payload, "\"protocol\":1");
-    check_contains("decision type", payload, "\"type\":\"decision\"");
-    check_contains("decision id", payload, "\"decisionId\":\"req-2\"");
-    check_contains("decision option", payload, "\"optionId\":\"allow\"");
-    check_contains("decision ts", payload, "\"ts\":");
+    check_contains("decision short frame", payload, "D:0");
 
     check_bool("battery payload builds", combrief_protocol_build_battery(payload, sizeof(payload), &state), false);
     combrief_app_state_set_battery(&state, 100);
@@ -234,14 +226,7 @@ int main(void)
     }
 
     const ack = extractFunction(source, 'combrief_protocol_build_host_ack');
-    for (const text of [
-      '\\"protocol\\":1',
-      '\\"type\\":\\"ack\\"',
-      '\\"hostMessageId\\":\\"%s\\"',
-      '\\"ok\\":true',
-      '\\"ok\\":false',
-      '\\"error\\":\\"%s\\"',
-    ]) {
+    for (const text of ['A:%s', 'E:%s']) {
       expect(ack).toContain(text);
     }
 
@@ -254,15 +239,8 @@ int main(void)
     expect(source).toContain('OFF');
 
     const decision = extractFunction(source, 'combrief_protocol_build_decision');
-    for (const text of [
-      '\\"protocol\\":1',
-      '\\"type\\":\\"decision\\"',
-      '\\"decisionId\\":\\"%s\\"',
-      '\\"optionId\\":\\"%s\\"',
-      '\\"ts\\":%u',
-    ]) {
-      expect(decision).toContain(text);
-    }
+    expect(decision).toContain('D:%u');
+    expect(decision).toContain('selected_option');
   });
 
   it('does not emit fields rejected or ignored by the desktop validators', () => {

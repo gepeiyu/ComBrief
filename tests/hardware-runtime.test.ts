@@ -156,6 +156,26 @@ describe('HardwareRuntime', () => {
     ]);
   });
 
+  it('uses the primary app label for fast state when compact summary has another app first', async () => {
+    const transport = new MockHardwareTransport();
+    const runtime = new HardwareRuntime(transport);
+
+    await runtime.start();
+    await runtime.sendState({
+      protocol: 1,
+      type: 'state',
+      appSummary: 'CC [OK]\nC [WORK]',
+      primary: 'cursor',
+      primaryStatus: 'working',
+      primaryLabel: 'C',
+    });
+
+    expect(transport.sentFastStates[0]).toMatchObject({
+      label: 'C',
+      status: 'working',
+    });
+  });
+
   it('forwards valid decision messages to callback', async () => {
     const transport = new MockHardwareTransport();
     const onDecision = vi.fn();

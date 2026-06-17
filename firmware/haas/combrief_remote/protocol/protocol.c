@@ -4,7 +4,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 static bool write_payload(char *out, size_t out_len, const char *format, ...)
 {
@@ -28,55 +27,6 @@ void protocol_init(void)
 
 void protocol_tick(void)
 {
-}
-
-static bool json_escape(char *out, size_t out_len, const char *value)
-{
-    size_t i = 0;
-    size_t j = 0;
-
-    if (out == NULL || out_len == 0) {
-        return false;
-    }
-
-    if (value == NULL) {
-        out[0] = '\0';
-        return true;
-    }
-
-    while (value[i] != '\0' && j + 1 < out_len) {
-        unsigned char ch = (unsigned char)value[i++];
-
-        if (ch == '"' || ch == '\\') {
-            if (j + 2 >= out_len) {
-                return false;
-            }
-            out[j++] = '\\';
-            out[j++] = (char)ch;
-            continue;
-        }
-        if (ch == '\n' || ch == '\r' || ch == '\t') {
-            char escaped = ch == '\n' ? 'n' : (ch == '\r' ? 'r' : 't');
-            if (j + 2 >= out_len) {
-                return false;
-            }
-            out[j++] = '\\';
-            out[j++] = escaped;
-            continue;
-        }
-        if (ch < 0x20) {
-            if (j + 7 >= out_len) {
-                return false;
-            }
-            j += (size_t)snprintf(&out[j], out_len - j, "\\u%04x", (unsigned int)ch);
-            continue;
-        }
-
-        out[j++] = (char)ch;
-    }
-
-    out[j] = '\0';
-    return value[i] == '\0';
 }
 
 bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app_state_t *state)
@@ -109,33 +59,17 @@ bool combrief_protocol_build_hello(char *out, size_t out_len, const combrief_app
 
 bool combrief_protocol_build_decision(char *out, size_t out_len, const combrief_app_state_t *state)
 {
-    char decision_id[96];
-    char option_id[64];
-    const combrief_option_t *option;
-
     if (state == NULL ||
         state->waiting_resolved ||
         state->remote_state == COMBRIEF_REMOTE_WAITING_RESOLVED ||
         state->decision_id[0] == '\0' ||
         state->option_count == 0 ||
-        state->selected_option >= state->option_count) {
+        state->selected_option >= state->option_count ||
+        state->options[state->selected_option].id[0] == '\0') {
         return false;
     }
 
-    option = &state->options[state->selected_option];
-    if (option->id[0] == '\0' ||
-        !json_escape(decision_id, sizeof(decision_id), state->decision_id) ||
-        !json_escape(option_id, sizeof(option_id), option->id)) {
-        return false;
-    }
-
-    return write_payload(
-        out,
-        out_len,
-        "{\"protocol\":1,\"type\":\"decision\",\"decisionId\":\"%s\",\"optionId\":\"%s\",\"ts\":%u}",
-        decision_id,
-        option_id,
-        (unsigned int)time(NULL));
+    return write_payload(out, out_len, "D:%u", (unsigned int)state->selected_option);
 }
 
 bool combrief_protocol_build_battery(char *out, size_t out_len, const combrief_app_state_t *state)
@@ -153,34 +87,16 @@ bool combrief_protocol_build_battery(char *out, size_t out_len, const combrief_a
 
 bool combrief_protocol_build_host_ack(char *out, size_t out_len, const char *host_message_id, bool ok, const char *error)
 {
-    char id[96];
-    char escaped_error[128];
-
-    if (host_message_id == NULL || host_message_id[0] == '\0' ||
-        !json_escape(id, sizeof(id), host_message_id)) {
+    if (host_message_id == NULL || host_message_id[0] == '\0') {
         return false;
     }
 
     if (ok) {
-        return write_payload(
-            out,
-            out_len,
-            "{\"protocol\":1,\"type\":\"ack\",\"hostMessageId\":\"%s\",\"ok\":true,\"ts\":%u}",
-            id,
-            (unsigned int)time(NULL));
+        return write_payload(out, out_len, "A:%s", host_message_id);
     }
 
-    if (!json_escape(escaped_error, sizeof(escaped_error), error != NULL && error[0] != '\0' ? error : "host message failed")) {
-        return false;
-    }
-
-    return write_payload(
-        out,
-        out_len,
-        "{\"protocol\":1,\"type\":\"ack\",\"hostMessageId\":\"%s\",\"ok\":false,\"error\":\"%s\",\"ts\":%u}",
-        id,
-        escaped_error,
-        (unsigned int)time(NULL));
+    (void)error;
+    return write_payload(out, out_len, "E:%s", host_message_id);
 }
 
 static bool is_json_object(const char *json)

@@ -3,11 +3,12 @@ const HOST_TX_UUID = '7b5c0002-8d4a-4c3a-9b4f-434252465001';
 const DEVICE_TX_UUID = '7b5c0003-8d4a-4c3a-9b4f-434252465001';
 const CONTROL_UUID = '7b5c0005-8d4a-4c3a-9b4f-434252465001';
 const REMOTE_NAME = 'ComBrief';
-const BRIDGE_V1_SINGLE_FRAME_MAX_BYTES = 500;
+const BRIDGE_V1_CHUNKED_MAX_BYTES = 1800;
 const BLE_WRITE_CHUNK_BYTES = 20;
-const BLE_CHUNK_PAYLOAD_BYTES = BLE_WRITE_CHUNK_BYTES - 1;
+const BLE_V2_CHUNK_HEADER_BYTES = 7;
+const BLE_CHUNK_PAYLOAD_BYTES = BLE_WRITE_CHUNK_BYTES - BLE_V2_CHUNK_HEADER_BYTES;
 const BLE_CHUNK_DELAY_MS = 12;
-const MAX_HOST_MESSAGE_BYTES = BRIDGE_V1_SINGLE_FRAME_MAX_BYTES;
+const MAX_HOST_MESSAGE_BYTES = BRIDGE_V1_CHUNKED_MAX_BYTES;
 
 const bridge = window.combriefHardwareBridge;
 const bridgeTitle = document.getElementById('bridge-title');
@@ -47,6 +48,9 @@ let notificationListener = null;
 let disconnectListenerDevice = null;
 let disconnectListener = null;
 let hostSendChain = Promise.resolve();
+let hostMessageSeq = 0;
+let deviceRxChunks = '';
+let activeRequest = null;
 
 function applyBridgeCopy(key, element) {
   if (element) {
@@ -129,12 +133,62 @@ function abortStaleConnection(activeEpoch, resources) {
   return false;
 }
 
+function deviceDecisionFromShortFrame(text) {
+  const match = /^D:(\d+)$/.exec(text);
+  if (!match || !activeRequest) return null;
+
+  const optionIndex = Number(match[1]);
+  const option = activeRequest.options?.[optionIndex];
+  if (!option || typeof option.id !== 'string' || option.id.length === 0) return null;
+
+  return {
+    protocol: 1,
+    type: 'decision',
+    decisionId: activeRequest.decisionId,
+    optionId: option.id,
+    ts: Date.now(),
+  };
+}
+
+function deviceAckFromShortFrame(text) {
+  const match = /^([AE]):([^:]+)$/.exec(text);
+  if (!match) return null;
+
+  return {
+    protocol: 1,
+    type: 'ack',
+    hostMessageId: match[2],
+    ok: match[1] === 'A',
+    ...(match[1] === 'E' ? { error: 'ComBrief Remote rejected host message' } : {}),
+    ts: Date.now(),
+  };
+}
+
 function handleDeviceNotification(event) {
   try {
     const value = event.target?.value;
-    const text = decoder.decode(value);
+    let text = decoder.decode(value);
+    const shortMessage = deviceAckFromShortFrame(text) || deviceDecisionFromShortFrame(text);
+    if (shortMessage) {
+      bridge?.sendDeviceMessage(shortMessage);
+      return;
+    }
+    if (text.startsWith('>') || text.startsWith('!')) {
+      const finalChunk = text.startsWith('!');
+      const payload = text.slice(1);
+      if (payload.startsWith('{')) {
+        deviceRxChunks = '';
+      }
+      deviceRxChunks += payload;
+      if (!finalChunk) return;
+      text = deviceRxChunks;
+      deviceRxChunks = '';
+    } else {
+      deviceRxChunks = '';
+    }
     bridge?.sendDeviceMessage(JSON.parse(text));
   } catch (error) {
+    deviceRxChunks = '';
     reportError(error);
   }
 }
@@ -163,6 +217,8 @@ function resetConnectionState() {
   controlCharacteristic = null;
   deviceTxCharacteristic = null;
   hostSendChain = Promise.resolve();
+  deviceRxChunks = '';
+  activeRequest = null;
 }
 
 function delay(ms) {
@@ -310,17 +366,61 @@ async function writeUnconfirmedBytes(characteristic, bytes) {
   throw new Error('ComBrief Remote characteristic does not support unconfirmed writes');
 }
 
+async function writeHostChunkBytes(characteristic, bytes) {
+  if (typeof characteristic?.writeValueWithResponse === 'function') {
+    await characteristic.writeValueWithResponse(bytes);
+    return;
+  }
+
+  if (typeof characteristic?.writeValue === 'function') {
+    await characteristic.writeValue(bytes);
+    return;
+  }
+
+  throw new Error('ComBrief Remote characteristic does not support confirmed writes');
+}
+
+function nextHostMessageSeq() {
+  hostMessageSeq = (hostMessageSeq % 255) + 1;
+  return hostMessageSeq;
+}
+
+function hexByte(value) {
+  return value.toString(16).toUpperCase().padStart(2, '0');
+}
+
 async function writeHostBytes(bytes) {
-  for (let offset = 0; offset < bytes.byteLength; offset += BLE_CHUNK_PAYLOAD_BYTES) {
+  const totalParts = Math.ceil(bytes.byteLength / BLE_CHUNK_PAYLOAD_BYTES);
+  if (totalParts <= 0 || totalParts > 255) {
+    throw new Error(`Host message exceeds v2 chunk count limit: ${totalParts} chunks`);
+  }
+
+  const seq = nextHostMessageSeq();
+  for (let partIndex = 0; partIndex < totalParts; partIndex += 1) {
+    const offset = partIndex * BLE_CHUNK_PAYLOAD_BYTES;
     const end = Math.min(offset + BLE_CHUNK_PAYLOAD_BYTES, bytes.byteLength);
-    const prefix = end >= bytes.byteLength ? '!'.charCodeAt(0) : '>'.charCodeAt(0);
-    const chunk = new Uint8Array(1 + end - offset);
-    chunk[0] = prefix;
-    chunk.set(bytes.slice(offset, end), 1);
-    await writeUnconfirmedBytes(hostTxCharacteristic, chunk);
-    if (end < bytes.byteLength) {
+    const header = encoder.encode(`@${hexByte(seq)}${hexByte(partIndex)}${hexByte(totalParts)}`);
+    const chunk = new Uint8Array(header.byteLength + end - offset);
+    chunk.set(header, 0);
+    chunk.set(bytes.slice(offset, end), header.byteLength);
+    await writeHostChunkBytes(hostTxCharacteristic, chunk);
+    if (partIndex < totalParts - 1) {
       await delay(BLE_CHUNK_DELAY_MS);
     }
+  }
+}
+
+function rememberActiveRequest(message) {
+  if (message?.type === 'request' && typeof message.decisionId === 'string' && Array.isArray(message.options)) {
+    activeRequest = {
+      decisionId: message.decisionId,
+      options: message.options,
+    };
+    return;
+  }
+
+  if (message?.type === 'resolved' && activeRequest?.decisionId === message.decisionId) {
+    activeRequest = null;
   }
 }
 
@@ -343,9 +443,10 @@ async function sendHostMessageInner(command) {
       throw new Error('ComBrief Remote is not connected');
     }
 
+    rememberActiveRequest(message);
     const bytes = encoder.encode(JSON.stringify(message));
     if (bytes.byteLength > MAX_HOST_MESSAGE_BYTES) {
-      throw new Error(`Host message exceeds v1 single-frame limit: ${bytes.byteLength} bytes`);
+      throw new Error(`Host message exceeds v1 chunked limit: ${bytes.byteLength} bytes`);
     }
 
     await writeHostBytes(bytes);

@@ -217,14 +217,20 @@ export class AppController {
       apps.find((item) => item.status === 'working') ??
       apps[0];
 
+    const appSummary = apps
+      .slice(0, 2)
+      .map((item) => `${item.label} [${this.hardwareStatusLabel(item.status)}]`)
+      .join('\n');
+    const firstSummaryApp = apps[0];
+
     return {
       protocol: HARDWARE_PROTOCOL_VERSION,
       type: 'state',
-      appSummary: apps
-        .slice(0, 2)
-        .map((item) => `${item.label} [${this.hardwareStatusLabel(item.status)}]`)
-        .join('\n'),
+      appSummary,
       primary: primaryApp?.id,
+      ...(primaryApp && firstSummaryApp?.id !== primaryApp.id
+        ? { primaryLabel: primaryApp.label }
+        : {}),
       primaryStatus: primaryApp?.status ?? 'idle',
     };
   }

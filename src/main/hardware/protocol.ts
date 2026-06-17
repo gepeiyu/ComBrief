@@ -78,6 +78,7 @@ export interface HardwareStateMessage {
   }>;
   appSummary?: string;
   primary?: string;
+  primaryLabel?: string;
   primaryStatus?: HardwareStatus;
   ts?: number;
 }

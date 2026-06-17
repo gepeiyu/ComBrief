@@ -22,6 +22,7 @@ import {
   emptyCursorHooks,
   injectCursorBridge,
   removeCursorBridge,
+  removeCursorRemoteGate,
   type CursorHooksFile,
 } from './hooks-json';
 import {
@@ -127,7 +128,9 @@ function refreshRegisteredAppHooks(appId: string): void {
   const bridgePath = bridgeScriptPath(appId);
   if (app.kind === 'cursor-hooks-json') {
     const current = readJsonFile(configPath, emptyCursorHooks());
-    writeJsonFile(configPath, injectCursorBridge(current, bridgePath, appId));
+    let next = injectCursorBridge(current, bridgePath, appId);
+    next = removeCursorRemoteGate(next, remoteGateScriptPath(appId));
+    writeJsonFile(configPath, next);
     return;
   }
 
@@ -162,8 +165,10 @@ export function installApp(appId: string): InstallResult {
 
   if (app.kind === 'cursor-hooks-json') {
     const current = readJsonFile(configPath, emptyCursorHooks());
-    chainCommands = collectChainCommands(current, bridgePath);
-    const next = injectCursorBridge(current, bridgePath, appId);
+    const gatePath = remoteGateScriptPath(appId);
+    chainCommands = collectChainCommands(current, bridgePath, gatePath);
+    let next = injectCursorBridge(current, bridgePath, appId);
+    next = removeCursorRemoteGate(next, gatePath);
     writeJsonFile(configPath, next);
   } else {
     const current = readJsonFile<ClaudeSettingsFile>(
@@ -215,7 +220,7 @@ export function uninstallApp(appId: string): void {
   // 只移除 ComBrief 条目，不还原安装时整文件备份（避免覆盖用户之后的 hook 修改）
   if (existsSync(configPath)) {
     if (app.kind === 'cursor-hooks-json') {
-      writeJsonFile(configPath, removeCursorFromFile(configPath, bridgeScriptPath(appId)));
+      writeJsonFile(configPath, removeCursorFromFile(configPath, bridgeScriptPath(appId), appId));
     } else {
       writeJsonFile(
         configPath,
@@ -235,9 +240,13 @@ export function uninstallApp(appId: string): void {
 function removeCursorFromFile(
   configPath: string,
   bridgePath: string,
+  appId: string,
 ): CursorHooksFile {
   const current = readJsonFile(configPath, emptyCursorHooks());
-  return removeCursorBridge(current, bridgePath);
+  return removeCursorRemoteGate(
+    removeCursorBridge(current, bridgePath),
+    remoteGateScriptPath(appId),
+  );
 }
 
 function removeClaudeFromFile(

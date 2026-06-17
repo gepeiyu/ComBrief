@@ -15,7 +15,7 @@ import {
 
 function sourceLabel(appId: string): string {
   if (appId === 'claude-code') return 'CC';
-  if (appId === 'cursor') return 'CU';
+  if (appId === 'cursor') return 'C';
   return appId.slice(0, 2).toUpperCase();
 }
 

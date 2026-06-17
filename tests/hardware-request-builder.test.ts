@@ -297,7 +297,9 @@ describe('buildHardwareRequest', () => {
       30_000,
     );
 
+    expect(mcpMsg.sourceLabel).toBe('C');
     expect(mcpMsg.kind).toBe('MCP');
+    expect(permissionMsg.sourceLabel).toBe('C');
     expect(permissionMsg.kind).toBe('PERMISSION');
   });
 

@@ -3,6 +3,8 @@ import {
   injectCursorBridge,
   removeCursorBridge,
   collectChainCommands,
+  injectCursorRemoteGate,
+  removeCursorRemoteGate,
 } from '../src/main/installer/hooks-json';
 
 const SAMPLE = {
@@ -28,5 +30,30 @@ describe('hooks-json', () => {
 
   it('collects chain commands', () => {
     expect(collectChainCommands(SAMPLE, '/tmp/bridge.sh')).toEqual(['echo hi']);
+  });
+
+  it('injects Cursor remote gate for decision-capable events with longer timeout', () => {
+    const result = injectCursorRemoteGate(SAMPLE, '/tmp/remote-gate.mjs');
+    expect(result.hooks.preToolUse?.at(-1)).toEqual({
+      command: '/tmp/remote-gate.mjs preToolUse',
+      timeout: 630000,
+    });
+    expect(result.hooks.beforeShellExecution?.at(-1)).toEqual({
+      command: '/tmp/remote-gate.mjs beforeShellExecution',
+      timeout: 630000,
+    });
+    expect(result.hooks.stop).toEqual(SAMPLE.hooks.stop);
+  });
+
+  it('does not collect existing Cursor remote gate as a chain command', () => {
+    const current = injectCursorRemoteGate(SAMPLE, '/tmp/remote-gate.mjs');
+    expect(collectChainCommands(current, '/tmp/bridge.sh', '/tmp/remote-gate.mjs')).toEqual([
+      'echo hi',
+    ]);
+  });
+
+  it('removes Cursor remote gate entries', () => {
+    const current = injectCursorRemoteGate(SAMPLE, '/tmp/remote-gate.mjs');
+    expect(removeCursorRemoteGate(current, '/tmp/remote-gate.mjs')).toEqual(SAMPLE);
   });
 });

@@ -107,4 +107,31 @@ describe('buildHookStdout', () => {
     expect(j.hookSpecificOutput.permissionDecision).toBe('deny');
     expect(j.hookSpecificOutput.permissionDecisionReason).toBe('Not now');
   });
+
+  it('Cursor preToolUse allow uses native Cursor hook stdout', () => {
+    const out = buildHookStdout({
+      appId: 'cursor',
+      hookEvent: 'preToolUse',
+      toolName: 'Shell',
+      toolInput: { command: 'npm test' },
+      action: { kind: 'allowOnce' },
+    });
+    const j = JSON.parse(out);
+    expect(j).toEqual({ permission: 'allow' });
+  });
+
+  it('Cursor preToolUse deny uses native Cursor hook stdout with message', () => {
+    const out = buildHookStdout({
+      appId: 'cursor',
+      hookEvent: 'preToolUse',
+      toolName: 'Shell',
+      toolInput: { command: 'rm -rf tmp' },
+      action: { kind: 'deny', reason: 'Denied via ComBrief Remote' },
+    });
+    const j = JSON.parse(out);
+    expect(j).toEqual({
+      permission: 'deny',
+      user_message: 'Denied via ComBrief Remote',
+    });
+  });
 });

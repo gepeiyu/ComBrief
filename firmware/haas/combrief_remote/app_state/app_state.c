@@ -281,6 +281,13 @@ void combrief_app_state_mark_decision_sent(combrief_app_state_t *state)
 
     state->waiting_resolved = true;
     state->remote_state = COMBRIEF_REMOTE_WAITING_RESOLVED;
+    state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
+    state->full_page = 0;
+    state->brief[0] = '\0';
+    state->content[0] = '\0';
+    memset(state->options, 0, sizeof(state->options));
+    state->option_count = 0;
+    state->selected_option = 0;
     copy_bounded(state->primary_status, sizeof(state->primary_status), "Waiting for resolution");
 }
 

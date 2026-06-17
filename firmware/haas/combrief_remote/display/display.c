@@ -14,6 +14,7 @@
 #endif
 
 #define COMBRIEF_OLED_LINE_LEN 64
+#define COMBRIEF_OLED_VISIBLE_COLUMNS 16
 #define COMBRIEF_OLED_LINE_STEP 13
 #define COMBRIEF_OLED_LEFT_MARGIN 2
 
@@ -88,6 +89,85 @@ static void copy_content_line(char *dest, size_t dest_len, const char *content, 
     }
     memcpy(dest, start, len);
     dest[len] = '\0';
+}
+
+static size_t utf8_char_len(const char *text)
+{
+    unsigned char ch;
+
+    if (text == NULL || text[0] == '\0') {
+        return 0;
+    }
+
+    ch = (unsigned char)text[0];
+    if (ch < 0x80) {
+        return 1;
+    }
+    if ((ch & 0xE0) == 0xC0) {
+        return 2;
+    }
+    if ((ch & 0xF0) == 0xE0) {
+        return 3;
+    }
+    if ((ch & 0xF8) == 0xF0) {
+        return 4;
+    }
+    return 1;
+}
+
+static uint8_t utf8_display_width(const char *text)
+{
+    return text != NULL && ((unsigned char)text[0]) >= 0x80 ? 2 : 1;
+}
+
+static void copy_wrapped_content_line(char *dest, size_t dest_len, const char *content, uint8_t line_index)
+{
+    const char *cursor;
+    uint8_t current = 0;
+
+    if (dest == NULL || dest_len == 0) {
+        return;
+    }
+    dest[0] = '\0';
+    if (content == NULL || content[0] == '\0') {
+        return;
+    }
+
+    cursor = content;
+    while (*cursor != '\0') {
+        const char *line_start = cursor;
+        size_t line_bytes = 0;
+        uint8_t columns = 0;
+
+        while (*cursor != '\0' && *cursor != '\n') {
+            size_t char_len = utf8_char_len(cursor);
+            uint8_t char_width = utf8_display_width(cursor);
+
+            if (char_len == 0) {
+                break;
+            }
+            if (columns > 0 && columns + char_width > COMBRIEF_OLED_VISIBLE_COLUMNS) {
+                break;
+            }
+            columns = (uint8_t)(columns + char_width);
+            line_bytes += char_len;
+            cursor += char_len;
+        }
+
+        if (current == line_index) {
+            if (line_bytes >= dest_len) {
+                line_bytes = dest_len - 1;
+            }
+            memcpy(dest, line_start, line_bytes);
+            dest[line_bytes] = '\0';
+            return;
+        }
+        current++;
+
+        if (*cursor == '\n') {
+            cursor++;
+        }
+    }
 }
 
 static void copy_log_line(char *dest, size_t dest_len, const char *text)
@@ -262,11 +342,11 @@ void display_render(void)
         char line4[COMBRIEF_OLED_LINE_LEN];
         char line5[COMBRIEF_OLED_LINE_LEN];
 
-        copy_content_line(line1, sizeof(line1), state->content, state->full_page);
-        copy_content_line(line2, sizeof(line2), state->content, (uint8_t)(state->full_page + 1));
-        copy_content_line(line3, sizeof(line3), state->content, (uint8_t)(state->full_page + 2));
-        copy_content_line(line4, sizeof(line4), state->content, (uint8_t)(state->full_page + 3));
-        copy_content_line(line5, sizeof(line5), state->content, (uint8_t)(state->full_page + 4));
+        copy_wrapped_content_line(line1, sizeof(line1), state->content, state->full_page);
+        copy_wrapped_content_line(line2, sizeof(line2), state->content, (uint8_t)(state->full_page + 1));
+        copy_wrapped_content_line(line3, sizeof(line3), state->content, (uint8_t)(state->full_page + 2));
+        copy_wrapped_content_line(line4, sizeof(line4), state->content, (uint8_t)(state->full_page + 3));
+        copy_wrapped_content_line(line5, sizeof(line5), state->content, (uint8_t)(state->full_page + 4));
         render_oled_lines5(line1, line2, line3, line4, line5);
         {
             char log1[COMBRIEF_OLED_LINE_LEN];

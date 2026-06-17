@@ -76,4 +76,40 @@ describe('install app refresh', () => {
     );
     expect(commands).not.toContain(join(tempHome, '.combrief', 'apps', 'claude-code', 'bridge.mjs'));
   });
+
+  it('removes Cursor remote gate when refreshing registered app scripts', async () => {
+    tempHome = mkdtempSync(join(tmpdir(), 'combrief-install-refresh-'));
+    const cursorDir = join(tempHome, '.cursor');
+    const combriefDir = join(tempHome, '.combrief');
+    mkdirSync(cursorDir, { recursive: true });
+    mkdirSync(combriefDir, { recursive: true });
+
+    writeFileSync(
+      join(combriefDir, 'config.json'),
+      JSON.stringify({ apps: ['cursor'] }),
+    );
+    writeFileSync(
+      join(cursorDir, 'hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          preToolUse: [
+            {
+              command: `${join(tempHome, '.combrief', 'apps', 'cursor', 'remote-gate.mjs')} preToolUse`,
+              timeout: 630000,
+            },
+          ],
+        },
+      }),
+    );
+
+    const { refreshRegisteredAppScripts } = await loadInstallerForHome(tempHome);
+    refreshRegisteredAppScripts(['cursor']);
+
+    const hooksJson = JSON.parse(readFileSync(join(cursorDir, 'hooks.json'), 'utf8'));
+    expect(hooksJson.hooks.preToolUse).toContainEqual({
+      command: `${join(tempHome, '.combrief', 'apps', 'cursor', 'bridge.mjs')} preToolUse`,
+    });
+    expect(JSON.stringify(hooksJson)).not.toContain('remote-gate');
+  });
 });

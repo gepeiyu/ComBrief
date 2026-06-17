@@ -185,6 +185,71 @@ describe('DecisionService hardware channel', () => {
     });
   });
 
+  it('returns native Cursor hook stdout when hardware approves Cursor tool use', async () => {
+    vi.useFakeTimers();
+    const { transport, service } = await setupHardwareService();
+
+    const wait = service.handleWait(
+      permissionBody({
+        appId: 'cursor',
+        hookEvent: 'preToolUse',
+        sessionId: 'cursor-sess',
+        toolName: 'Shell',
+        toolInput: { command: 'npm test' },
+      }),
+    );
+    const request = latestRequest(transport);
+    expect(request?.sourceLabel).toBe('C');
+
+    transport.emitDeviceMessage({
+      protocol: 1,
+      type: 'decision',
+      decisionId: request?.decisionId ?? '',
+      optionId: 'allow',
+      ts: Date.now(),
+    });
+
+    const result = await wait;
+    expect(JSON.parse(result.hookStdout ?? '{}')).toEqual({ permission: 'allow' });
+    expect(transport.sentMessages.at(-1)).toMatchObject({
+      type: 'resolved',
+      decisionId: request?.decisionId,
+      result: 'approved',
+    });
+  });
+
+  it('returns native Cursor hook stdout when hardware denies Cursor tool use', async () => {
+    vi.useFakeTimers();
+    const { transport, service } = await setupHardwareService();
+
+    const wait = service.handleWait(
+      permissionBody({
+        appId: 'cursor',
+        hookEvent: 'preToolUse',
+        sessionId: 'cursor-deny',
+        toolName: 'Shell',
+        toolInput: { command: 'rm -rf tmp' },
+      }),
+    );
+    const request = latestRequest(transport);
+
+    transport.emitDeviceMessage({
+      protocol: 1,
+      type: 'decision',
+      decisionId: request?.decisionId ?? '',
+      optionId: 'deny',
+      ts: Date.now(),
+    });
+
+    const result = await wait;
+    expect(JSON.parse(result.hookStdout ?? '{}')).toEqual({ permission: 'deny' });
+    expect(transport.sentMessages.at(-1)).toMatchObject({
+      type: 'resolved',
+      decisionId: request?.decisionId,
+      result: 'denied',
+    });
+  });
+
   it('ignores stale hardware decisions after local resolution', async () => {
     vi.useFakeTimers();
     const { transport, service } = await setupHardwareService();

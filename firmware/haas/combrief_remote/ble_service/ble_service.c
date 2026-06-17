@@ -14,6 +14,11 @@ void hci_h4_driver_init(void);
 #endif
 
 #define COMBRIEF_BLE_TX_BUFFER_LEN 512
+#define COMBRIEF_BLE_NOTIFY_SINGLE_MAX_LEN 20
+#define COMBRIEF_BLE_NOTIFY_CHUNK_PAYLOAD_LEN 19
+#define COMBRIEF_BLE_HOST_RX_BUFFER_LEN 2048
+#define COMBRIEF_BLE_HOST_V2_HEADER_LEN 7
+#define COMBRIEF_BLE_HOST_V2_PAYLOAD_LEN 13
 #define COMBRIEF_HELLO_RETRY_TICKS 4
 
 #if defined(BOARD_HAASEDUK1)
@@ -66,8 +71,11 @@ static const char *k_combrief_ble_control_uuid = COMBRIEF_BLE_CONTROL_UUID;
 
 static char g_device_name[32] = COMBRIEF_BLE_DEVICE_NAME;
 static char g_service_uuid[40] = COMBRIEF_BLE_SERVICE_UUID;
-static char g_host_rx_buffer[COMBRIEF_BLE_TX_BUFFER_LEN];
+static char g_host_rx_buffer[COMBRIEF_BLE_HOST_RX_BUFFER_LEN];
 static size_t g_host_rx_len;
+static uint8_t g_host_rx_seq;
+static uint8_t g_host_rx_total_parts;
+static uint8_t g_host_rx_next_part;
 static bool g_advertising;
 static bool g_connected;
 static bool g_notify_enabled;
@@ -136,6 +144,111 @@ static bool ble_service_extract_host_message_id(const char *json, char *out, siz
 
     out[used] = '\0';
     return used > 0;
+}
+
+static uint8_t ble_service_hex_nibble(char value)
+{
+    if (value >= '0' && value <= '9') {
+        return (uint8_t)(value - '0');
+    }
+    if (value >= 'A' && value <= 'F') {
+        return (uint8_t)(value - 'A' + 10);
+    }
+    if (value >= 'a' && value <= 'f') {
+        return (uint8_t)(value - 'a' + 10);
+    }
+    return 0xFF;
+}
+
+static bool ble_service_parse_hex_byte(const char *text, uint8_t *out)
+{
+    uint8_t high;
+    uint8_t low;
+
+    if (text == NULL || out == NULL) {
+        return false;
+    }
+    high = ble_service_hex_nibble(text[0]);
+    low = ble_service_hex_nibble(text[1]);
+    if (high == 0xFF || low == 0xFF) {
+        return false;
+    }
+    *out = (uint8_t)((high << 4) | low);
+    return true;
+}
+
+static void ble_service_reset_host_rx(void)
+{
+    g_host_rx_len = 0;
+    g_host_rx_buffer[0] = '\0';
+    g_host_rx_seq = 0;
+    g_host_rx_total_parts = 0;
+    g_host_rx_next_part = 0;
+}
+
+static bool ble_service_handle_v2_host_chunk(const char *json, const char **payload_out)
+{
+    uint8_t seq;
+    uint8_t part_index;
+    uint8_t total_parts;
+    const char *payload;
+    size_t payload_len;
+
+    if (json == NULL || payload_out == NULL || strlen(json) < COMBRIEF_BLE_HOST_V2_HEADER_LEN) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+    if (!ble_service_parse_hex_byte(json + 1, &seq) ||
+        !ble_service_parse_hex_byte(json + 3, &part_index) ||
+        !ble_service_parse_hex_byte(json + 5, &total_parts) || total_parts == 0) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+    if (part_index >= total_parts) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+
+    payload = json + COMBRIEF_BLE_HOST_V2_HEADER_LEN;
+    payload_len = strlen(payload);
+    if (payload_len > COMBRIEF_BLE_HOST_V2_PAYLOAD_LEN) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+
+    if (part_index == 0) {
+        ble_service_reset_host_rx();
+        g_host_rx_seq = seq;
+        g_host_rx_total_parts = total_parts;
+    } else if (seq != g_host_rx_seq || total_parts != g_host_rx_total_parts || part_index != g_host_rx_next_part) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+
+    if (g_host_rx_len + payload_len >= sizeof(g_host_rx_buffer)) {
+        ble_service_reset_host_rx();
+        return false;
+    }
+    memcpy(&g_host_rx_buffer[g_host_rx_len], payload, payload_len);
+    g_host_rx_len += payload_len;
+    g_host_rx_buffer[g_host_rx_len] = '\0';
+    g_host_rx_next_part = (uint8_t)(part_index + 1);
+
+    printf("ComBrief BLE host v2 chunk characteristic=%s seq=%u part=%u total_parts=%u length=%u total=%u\n",
+        k_combrief_ble_host_tx_uuid,
+        (unsigned int)seq,
+        (unsigned int)part_index,
+        (unsigned int)total_parts,
+        (unsigned int)payload_len,
+        (unsigned int)g_host_rx_len);
+
+    if (part_index + 1U < total_parts) {
+        *payload_out = NULL;
+        return true;
+    }
+
+    *payload_out = g_host_rx_buffer;
+    return true;
 }
 
 static bool ble_service_send_host_ack(const char *host_message_id, bool ok, const char *error)
@@ -360,8 +473,7 @@ void ble_service_init(const char *device_name, const char *service_uuid)
     g_notify_enabled = false;
     g_awaiting_host_sync = false;
     g_hello_retry_ticks = 0;
-    g_host_rx_len = 0;
-    g_host_rx_buffer[0] = '\0';
+    ble_service_reset_host_rx();
 
 #if COMBRIEF_HAS_HAAS_BLE
     g_conn_handle = -1;
@@ -438,22 +550,74 @@ void ble_service_tick(void)
     (void)ble_service_send_hello();
 }
 
+#if COMBRIEF_HAS_HAAS_BLE
+static bool ble_service_notify_bytes(const uint8_t *bytes, size_t len)
+{
+    if (bytes == NULL || len == 0) {
+        printf("ComBrief BLE notify skipped: empty payload\n");
+        return false;
+    }
+    if (!g_connected) {
+        printf("ComBrief BLE notify skipped: disconnected\n");
+        return false;
+    }
+    if (g_conn_handle < 0 || g_service_handle < 0 || len > COMBRIEF_BLE_NOTIFY_SINGLE_MAX_LEN) {
+        printf("ComBrief BLE notify skipped conn=%d notify=%u service=%d length=%u\n",
+            (int)g_conn_handle,
+            g_notify_enabled ? 1U : 0U,
+            (int)g_service_handle,
+            (unsigned int)len);
+        return false;
+    }
+    if (ble_stack_gatt_notificate(g_conn_handle, (uint16_t)(g_service_handle + COMBRIEF_GATT_IDX_DEVICE_TX_VAL), bytes, (uint16_t)len) != 0) {
+        printf("ComBrief BLE notify failed notify=%u length=%u\n",
+            g_notify_enabled ? 1U : 0U,
+            (unsigned int)len);
+        return false;
+    }
+    return true;
+}
+#endif
+
 bool combrief_ble_send_json(const char *json)
 {
     size_t payload_len;
 
-    if (json == NULL || json[0] == '\0' || !g_connected) {
+    if (json == NULL || json[0] == '\0') {
+        printf("ComBrief BLE notify skipped: empty payload\n");
+        return false;
+    }
+    if (!g_connected) {
+        printf("ComBrief BLE notify skipped: disconnected\n");
         return false;
     }
 
     payload_len = strlen(json);
 #if COMBRIEF_HAS_HAAS_BLE
-    if (g_conn_handle < 0 || !g_notify_enabled || g_service_handle < 0 || payload_len > 244) {
+    if (payload_len + 1 > COMBRIEF_BLE_TX_BUFFER_LEN) {
+        printf("ComBrief BLE notify skipped: payload too large length=%u\n", (unsigned int)payload_len);
         return false;
     }
 
-    if (ble_stack_gatt_notificate(g_conn_handle, (uint16_t)(g_service_handle + COMBRIEF_GATT_IDX_DEVICE_TX_VAL), (const uint8_t *)json, (uint16_t)payload_len) != 0) {
-        return false;
+    if (payload_len <= COMBRIEF_BLE_NOTIFY_SINGLE_MAX_LEN) {
+        if (!ble_service_notify_bytes((const uint8_t *)json, payload_len)) {
+            return false;
+        }
+    } else {
+        size_t offset = 0;
+        while (offset < payload_len) {
+            uint8_t chunk[COMBRIEF_BLE_NOTIFY_SINGLE_MAX_LEN];
+            size_t part = payload_len - offset;
+            if (part > COMBRIEF_BLE_NOTIFY_CHUNK_PAYLOAD_LEN) {
+                part = COMBRIEF_BLE_NOTIFY_CHUNK_PAYLOAD_LEN;
+            }
+            chunk[0] = offset + part >= payload_len ? '!' : '>';
+            memcpy(chunk + 1, json + offset, part);
+            if (!ble_service_notify_bytes(chunk, part + 1)) {
+                return false;
+            }
+            offset += part;
+        }
     }
 #endif
     printf("ComBrief BLE notify characteristic=%s length=%u\n",
@@ -523,17 +687,22 @@ bool ble_service_handle_host_write(const char *json)
         return false;
     }
 
-    if (json[0] == '>' || json[0] == '!') {
+    if (json[0] == '@') {
+        if (!ble_service_handle_v2_host_chunk(json, &payload)) {
+            return false;
+        }
+        if (payload == NULL) {
+            return true;
+        }
+    } else if (json[0] == '>' || json[0] == '!') {
         final_chunk = json[0] == '!';
         payload = json + 1;
         payload_len = strlen(payload);
         if (payload[0] == '{') {
-            g_host_rx_len = 0;
-            g_host_rx_buffer[0] = '\0';
+            ble_service_reset_host_rx();
         }
         if (g_host_rx_len + payload_len >= sizeof(g_host_rx_buffer)) {
-            g_host_rx_len = 0;
-            g_host_rx_buffer[0] = '\0';
+            ble_service_reset_host_rx();
             return false;
         }
         memcpy(&g_host_rx_buffer[g_host_rx_len], payload, payload_len);
@@ -549,8 +718,7 @@ bool ble_service_handle_host_write(const char *json)
         }
         payload = g_host_rx_buffer;
     } else {
-        g_host_rx_len = 0;
-        g_host_rx_buffer[0] = '\0';
+        ble_service_reset_host_rx();
         payload_len = strlen(payload);
     }
 
@@ -563,8 +731,7 @@ bool ble_service_handle_host_write(const char *json)
         if (has_host_message_id) {
             (void)ble_service_send_host_ack(host_message_id, false, "apply failed");
         }
-        g_host_rx_len = 0;
-        g_host_rx_buffer[0] = '\0';
+        ble_service_reset_host_rx();
         return false;
     }
 
@@ -573,8 +740,7 @@ bool ble_service_handle_host_write(const char *json)
     }
 
     g_awaiting_host_sync = false;
-    g_host_rx_len = 0;
-    g_host_rx_buffer[0] = '\0';
+    ble_service_reset_host_rx();
     return true;
 }
 
@@ -595,8 +761,7 @@ void ble_service_on_disconnected(void)
     g_notify_enabled = false;
     g_awaiting_host_sync = false;
     g_hello_retry_ticks = 0;
-    g_host_rx_len = 0;
-    g_host_rx_buffer[0] = '\0';
+    ble_service_reset_host_rx();
     combrief_app_state_set_ble_connected(combrief_app_state_get_mutable(), false);
     ble_service_start_advertising();
 }

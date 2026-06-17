@@ -50,11 +50,16 @@ export function isCombriefHook(
 export function collectChainCommands(
   hooksJson: CursorHooksFile,
   bridgePath?: string,
+  gatePath?: string,
 ): string[] {
   const commands = new Set<string>();
   for (const list of Object.values(hooksJson.hooks ?? {})) {
     for (const entry of list) {
-      if (!isCombriefHook(entry, bridgePath) && entry.command) {
+      if (
+        !isCombriefHook(entry, bridgePath) &&
+        !isCombriefHook(entry, gatePath) &&
+        entry.command
+      ) {
         commands.add(entry.command);
       }
     }
@@ -82,6 +87,52 @@ export function injectCursorBridge(
     next.hooks[event] = list;
   }
 
+  return next;
+}
+
+export const CURSOR_DECISION_TIMEOUT_MS = 630_000;
+export const CURSOR_REMOTE_GATE_EVENTS = [
+  'preToolUse',
+  'beforeShellExecution',
+] as const;
+
+export function injectCursorRemoteGate(
+  hooksJson: CursorHooksFile,
+  gatePath: string,
+): CursorHooksFile {
+  const next = removeCursorRemoteGate(hooksJson, gatePath);
+  next.version ??= 1;
+  next.hooks ??= {};
+
+  for (const event of CURSOR_REMOTE_GATE_EVENTS) {
+    const list = (next.hooks[event] ?? []).filter(
+      (h) => !isCombriefHook(h, gatePath),
+    );
+    list.push({
+      command: formatCursorHookCommand(gatePath, event),
+      timeout: CURSOR_DECISION_TIMEOUT_MS,
+    });
+    next.hooks[event] = list;
+  }
+
+  return next;
+}
+
+export function removeCursorRemoteGate(
+  hooksJson: CursorHooksFile,
+  gatePath: string,
+): CursorHooksFile {
+  const next: CursorHooksFile = structuredClone(hooksJson);
+  for (const event of Object.keys(next.hooks ?? {})) {
+    const list = (next.hooks[event] ?? []).filter(
+      (h) => !isCombriefHook(h, gatePath),
+    );
+    if (list.length === 0) {
+      delete next.hooks[event];
+    } else {
+      next.hooks[event] = list;
+    }
+  }
   return next;
 }
 
