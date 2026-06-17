@@ -81,6 +81,9 @@ static bool g_connected;
 static bool g_notify_enabled;
 static bool g_awaiting_host_sync;
 static uint8_t g_hello_retry_ticks;
+static char g_fast_status_labels[COMBRIEF_MAX_TRACKED_APPS][24];
+static uint8_t g_fast_status_seq[COMBRIEF_MAX_TRACKED_APPS];
+static bool g_fast_status_seq_known[COMBRIEF_MAX_TRACKED_APPS];
 
 static void copy_or_default(char *dest, size_t dest_len, const char *value, const char *fallback)
 {
@@ -146,6 +149,49 @@ static bool ble_service_extract_host_message_id(const char *json, char *out, siz
     return used > 0;
 }
 
+static bool fast_status_seq_is_newer(uint8_t seq, uint8_t previous)
+{
+    return seq != previous && (uint8_t)(seq - previous) < 128U;
+}
+
+static bool ble_service_accept_fast_status_seq(const char *label, uint8_t seq)
+{
+    uint8_t i;
+    uint8_t empty_slot = COMBRIEF_MAX_TRACKED_APPS;
+
+    if (label == NULL || label[0] == '\0') {
+        return false;
+    }
+
+    for (i = 0; i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        if (g_fast_status_seq_known[i] && strcmp(g_fast_status_labels[i], label) == 0) {
+            if (!fast_status_seq_is_newer(seq, g_fast_status_seq[i])) {
+                return false;
+            }
+            g_fast_status_seq[i] = seq;
+            return true;
+        }
+        if (!g_fast_status_seq_known[i] && empty_slot == COMBRIEF_MAX_TRACKED_APPS) {
+            empty_slot = i;
+        }
+    }
+
+    if (empty_slot == COMBRIEF_MAX_TRACKED_APPS) {
+        empty_slot = COMBRIEF_MAX_TRACKED_APPS - 1;
+    }
+    copy_or_default(g_fast_status_labels[empty_slot], sizeof(g_fast_status_labels[empty_slot]), label, "CB");
+    g_fast_status_seq[empty_slot] = seq;
+    g_fast_status_seq_known[empty_slot] = true;
+    return true;
+}
+
+static void ble_service_reset_fast_status_seq(void)
+{
+    memset(g_fast_status_labels, 0, sizeof(g_fast_status_labels));
+    memset(g_fast_status_seq, 0, sizeof(g_fast_status_seq));
+    memset(g_fast_status_seq_known, 0, sizeof(g_fast_status_seq_known));
+}
+
 static uint8_t ble_service_hex_nibble(char value)
 {
     if (value >= '0' && value <= '9') {
@@ -184,6 +230,32 @@ static void ble_service_reset_host_rx(void)
     g_host_rx_seq = 0;
     g_host_rx_total_parts = 0;
     g_host_rx_next_part = 0;
+}
+
+static bool ble_service_parse_fast_status_seq(const char *text, uint8_t *out)
+{
+    uint8_t value;
+
+    if (text == NULL || out == NULL) {
+        return false;
+    }
+    value = ble_service_hex_nibble(text[0]);
+    if (value == 0xFF) {
+        return false;
+    }
+    if (text[1] == ':') {
+        *out = value;
+        return true;
+    }
+    if (text[1] != '\0' && text[2] == ':') {
+        uint8_t low = ble_service_hex_nibble(text[1]);
+        if (low == 0xFF) {
+            return false;
+        }
+        *out = (uint8_t)((value << 4) | low);
+        return true;
+    }
+    return false;
 }
 
 static bool ble_service_handle_v2_host_chunk(const char *json, const char **payload_out)
@@ -474,6 +546,7 @@ void ble_service_init(const char *device_name, const char *service_uuid)
     g_awaiting_host_sync = false;
     g_hello_retry_ticks = 0;
     ble_service_reset_host_rx();
+    ble_service_reset_fast_status_seq();
 
 #if COMBRIEF_HAS_HAAS_BLE
     g_conn_handle = -1;
@@ -639,11 +712,15 @@ bool ble_service_handle_fast_status_write(const char *payload)
     char status_buf[24];
     char label_buf[24];
     size_t status_len;
+    uint8_t seq;
 
     if (payload == NULL || state == NULL || strncmp(payload, "S:", 2) != 0) {
         return false;
     }
 
+    if (!ble_service_parse_fast_status_seq(payload + 2, &seq)) {
+        return false;
+    }
     status = strchr(payload + 2, ':');
     if (status == NULL) {
         return false;
@@ -665,10 +742,19 @@ bool ble_service_handle_fast_status_write(const char *payload)
         return false;
     }
     (void)snprintf(label_buf, sizeof(label_buf), "%s", label);
+    if (!ble_service_accept_fast_status_seq(label_buf, seq)) {
+        printf("ComBrief BLE fast status stale characteristic=%s seq=%u status=%s label=%s\n",
+            k_combrief_ble_control_uuid,
+            (unsigned int)seq,
+            status_buf,
+            label_buf);
+        return false;
+    }
 
     combrief_app_state_apply_fast_status(state, label_buf, status_buf);
-    printf("ComBrief BLE fast status characteristic=%s status=%s label=%s\n",
+    printf("ComBrief BLE fast status characteristic=%s seq=%u status=%s label=%s\n",
         k_combrief_ble_control_uuid,
+        (unsigned int)seq,
         status_buf,
         label_buf);
     return true;
@@ -752,6 +838,7 @@ void ble_service_on_connected(void)
     g_advertising = false;
     g_awaiting_host_sync = true;
     g_hello_retry_ticks = COMBRIEF_HELLO_RETRY_TICKS;
+    ble_service_reset_fast_status_seq();
     combrief_app_state_set_ble_connected(state, true);
 }
 
@@ -762,6 +849,7 @@ void ble_service_on_disconnected(void)
     g_awaiting_host_sync = false;
     g_hello_retry_ticks = 0;
     ble_service_reset_host_rx();
+    ble_service_reset_fast_status_seq();
     combrief_app_state_set_ble_connected(combrief_app_state_get_mutable(), false);
     ble_service_start_advertising();
 }

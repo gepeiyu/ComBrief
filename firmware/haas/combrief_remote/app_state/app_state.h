@@ -22,6 +22,13 @@ typedef enum {
     COMBRIEF_DISPLAY_FULL
 } combrief_display_mode_t;
 
+#define COMBRIEF_MAX_TRACKED_APPS 2
+
+typedef struct {
+    char label[25];
+    char status[32];
+} combrief_app_slot_t;
+
 typedef struct {
     char id[32];
     char label[25];
@@ -34,6 +41,8 @@ typedef struct {
     char app_version[16];
     char primary_status[64];
     char app_summary[64];
+    combrief_app_slot_t app_slots[COMBRIEF_MAX_TRACKED_APPS];
+    uint8_t app_slot_count;
     bool battery_known;
     uint8_t battery_percent;
     char decision_id[48];
@@ -57,6 +66,10 @@ const combrief_app_state_t *combrief_app_state_get(void);
 void combrief_app_state_set_ble_connected(combrief_app_state_t *state, bool connected);
 void combrief_app_state_set_primary_status(combrief_app_state_t *state, const char *status);
 void combrief_app_state_set_app_summary(combrief_app_state_t *state, const char *summary);
+bool combrief_app_state_set_app_slot(combrief_app_state_t *state, uint8_t index, const char *label, const char *status);
+void combrief_app_state_clear_app_slots(combrief_app_state_t *state);
+void combrief_app_state_rebuild_app_summary(combrief_app_state_t *state);
+bool combrief_app_state_has_status(const combrief_app_state_t *state, const char *status);
 void combrief_app_state_apply_fast_status(combrief_app_state_t *state, const char *label, const char *status);
 void combrief_app_state_set_battery(combrief_app_state_t *state, uint8_t percent);
 void combrief_app_state_set_battery_unknown(combrief_app_state_t *state);

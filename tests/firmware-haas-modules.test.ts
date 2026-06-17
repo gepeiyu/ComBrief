@@ -1294,6 +1294,153 @@ int main(void)
     expect(source).toContain('ble_service_notify_bytes(chunk, part + 1)');
   });
 
+  it('keeps separate app rows when fast status updates one app', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+#include "protocol.h"
+
+static int failures = 0;
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    const char *initial_json = "{\"protocol\":1,\"type\":\"state\",\"appName\":\"ComBrief\",\"appVersion\":\"0.1.0\",\"apps\":[{\"id\":\"claude-code\",\"label\":\"CC\",\"status\":\"idle\"},{\"id\":\"cursor\",\"label\":\"C\",\"status\":\"idle\"}],\"primary\":\"cursor\",\"primaryStatus\":\"idle\",\"ts\":200}";
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    (void)combrief_protocol_apply_host_message(state, initial_json);
+    check_str("initial summary", state->app_summary, "CC [OK]\nC [OK]");
+
+    if (!ble_service_handle_fast_status_write("S:7:working:C")) {
+        printf("FAIL fast cursor working rejected\n");
+        failures++;
+    }
+    check_str("cursor working summary", state->app_summary, "CC [OK]\nC [WORK]");
+    check_str("cursor working primary", state->primary_status, "working");
+
+    if (!ble_service_handle_fast_status_write("S:8:idle:C")) {
+        printf("FAIL fast cursor idle rejected\n");
+        failures++;
+    }
+    check_str("cursor idle summary", state->app_summary, "CC [OK]\nC [OK]");
+    check_str("cursor idle primary", state->primary_status, "idle");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
+  it('renders LED priority from independent app rows', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+#include "led.h"
+#include "protocol.h"
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    const char *initial_json = "{\"protocol\":1,\"type\":\"state\",\"appName\":\"ComBrief\",\"appVersion\":\"0.1.0\",\"apps\":[{\"id\":\"claude-code\",\"label\":\"CC\",\"status\":\"idle\"},{\"id\":\"cursor\",\"label\":\"C\",\"status\":\"idle\"}],\"primary\":\"cursor\",\"primaryStatus\":\"idle\",\"ts\":201}";
+
+    app_state_init();
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    (void)combrief_protocol_apply_host_message(state, initial_json);
+    (void)ble_service_handle_fast_status_write("S:9:working:C");
+    led_render();
+    (void)ble_service_handle_fast_status_write("S:A:waiting_user:CC");
+    led_render();
+    (void)ble_service_handle_fast_status_write("S:B:idle:CC");
+    led_render();
+    (void)ble_service_handle_fast_status_write("S:C:idle:C");
+    led_render();
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service', 'led']);
+
+    const ledLines = output.split('\n').filter((line) => line.startsWith('LED '));
+    expect(ledLines.slice(-4)).toEqual([
+      'LED blue: connected working blue software breathing target=10',
+      'LED red: connected waiting user red breathing on',
+      'LED blue: connected working blue software breathing target=25',
+      'LED green: connected idle',
+    ]);
+  });
+
+  it('ignores older fast status seq for the same app label', () => {
+    const output = compileAndRunFirmwareHarness(String.raw`
+#include <stdio.h>
+#include <string.h>
+
+#include "app_state.h"
+#include "ble_service.h"
+#include "protocol.h"
+
+static int failures = 0;
+
+static void check_str(const char *label, const char *actual, const char *expected)
+{
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL %s expected=%s actual=%s\n", label, expected, actual);
+        failures++;
+    }
+}
+
+int main(void)
+{
+    combrief_app_state_t *state;
+    const char *initial_json = "{\"protocol\":1,\"type\":\"state\",\"appName\":\"ComBrief\",\"appVersion\":\"0.1.0\",\"apps\":[{\"id\":\"claude-code\",\"label\":\"CC\",\"status\":\"idle\"},{\"id\":\"cursor\",\"label\":\"C\",\"status\":\"working\"}],\"primary\":\"cursor\",\"primaryStatus\":\"working\",\"ts\":202}";
+
+    app_state_init();
+    ble_service_init(NULL, NULL);
+    state = combrief_app_state_get_mutable();
+    combrief_app_state_set_ble_connected(state, true);
+    (void)combrief_protocol_apply_host_message(state, initial_json);
+    check_str("initial summary", state->app_summary, "CC [OK]\nC [WORK]");
+
+    if (!ble_service_handle_fast_status_write("S:10:idle:C")) {
+        printf("FAIL fast cursor idle rejected\n");
+        failures++;
+    }
+    if (ble_service_handle_fast_status_write("S:0F:working:C")) {
+        printf("FAIL older cursor working accepted\n");
+        failures++;
+    }
+    check_str("stale working ignored", state->app_summary, "CC [OK]\nC [OK]");
+
+    if (failures != 0) {
+        return 1;
+    }
+    printf("ok\n");
+    return 0;
+}
+`, ['app_state', 'protocol', 'ble_service']);
+
+    expect(output).toContain('ok');
+  });
+
   it('applies fast status writes without waiting for full host JSON', () => {
     const output = compileAndRunFirmwareHarness(String.raw`
 #include <stdio.h>
@@ -1332,7 +1479,7 @@ int main(void)
         printf("FAIL fast waiting rejected\n");
         failures++;
     }
-    check_str("waiting summary", state->app_summary, "CC [ASK]\nLoading...");
+    check_str("waiting summary", state->app_summary, "CC [ASK]");
     check_str("waiting primary", state->primary_status, "waiting_user");
 
     if (failures != 0) {
@@ -1346,7 +1493,7 @@ int main(void)
     expect(output).toContain('ok');
   });
 
-  it('keeps fast waiting-user loading visible when an older working state arrives', () => {
+  it('keeps fast waiting-user status visible when an older working state arrives', () => {
     const output = compileAndRunFirmwareHarness(String.raw`
 #include <stdio.h>
 #include <string.h>
@@ -1372,7 +1519,6 @@ int main(void)
 `, ['app_state', 'protocol', 'ble_service', 'display']);
 
     expect(output).toContain('OLED: Apps - CC [ASK]');
-    expect(output).toContain('Loading...');
     expect(output).not.toContain('OLED: Apps - CC [WORK]');
   });
 

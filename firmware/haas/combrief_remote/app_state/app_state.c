@@ -25,6 +25,57 @@ static bool combrief_app_state_is_waiting_resolved(const combrief_app_state_t *s
     return state != NULL && (state->waiting_resolved || state->remote_state == COMBRIEF_REMOTE_WAITING_RESOLVED);
 }
 
+static const char *display_status_label(const char *status)
+{
+    if (status == NULL || status[0] == '\0') {
+        return "UNK";
+    }
+    if (strcmp(status, "idle") == 0 || strcmp(status, "ready") == 0 || strcmp(status, "Ready") == 0) {
+        return "OK";
+    }
+    if (strcmp(status, "working") == 0 || strcmp(status, "Working") == 0) {
+        return "WORK";
+    }
+    if (strcmp(status, "waiting_user") == 0 || strcmp(status, "waiting") == 0) {
+        return "ASK";
+    }
+    if (strcmp(status, "offline") == 0) {
+        return "OFF";
+    }
+    return status;
+}
+
+static bool app_status_is_active(const char *status)
+{
+    return status != NULL && (
+        strcmp(status, "waiting_user") == 0 ||
+        strcmp(status, "waiting") == 0 ||
+        strcmp(status, "working") == 0);
+}
+
+static const char *dominant_app_status(const combrief_app_state_t *state)
+{
+    uint8_t i;
+
+    if (state == NULL) {
+        return "idle";
+    }
+    for (i = 0; i < state->app_slot_count && i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        if (strcmp(state->app_slots[i].status, "waiting_user") == 0 || strcmp(state->app_slots[i].status, "waiting") == 0) {
+            return "waiting_user";
+        }
+    }
+    for (i = 0; i < state->app_slot_count && i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        if (strcmp(state->app_slots[i].status, "working") == 0) {
+            return "working";
+        }
+    }
+    if (state->app_slot_count > 0) {
+        return state->app_slots[0].status[0] != '\0' ? state->app_slots[0].status : "idle";
+    }
+    return "idle";
+}
+
 void combrief_app_state_init(combrief_app_state_t *state)
 {
     if (state == NULL) {
@@ -103,52 +154,116 @@ void combrief_app_state_set_app_summary(combrief_app_state_t *state, const char 
     copy_bounded(state->app_summary, sizeof(state->app_summary), summary);
 }
 
-void combrief_app_state_apply_fast_status(combrief_app_state_t *state, const char *label, const char *status)
+void combrief_app_state_rebuild_app_summary(combrief_app_state_t *state)
 {
-    const char *safe_label = label != NULL && label[0] != '\0' ? label : "CB";
-    const char *status_label = "OK";
-    char summary[64];
+    uint8_t i;
+    size_t used = 0;
 
     if (state == NULL) {
         return;
     }
 
-    if (status != NULL && strcmp(status, "working") == 0) {
-        status_label = "WORK";
-        state->remote_state = COMBRIEF_REMOTE_IDLE;
-        copy_bounded(state->primary_status, sizeof(state->primary_status), "working");
-        state->decision_id[0] = '\0';
-        state->option_count = 0;
-    } else if (status != NULL && strcmp(status, "waiting_user") == 0) {
-        status_label = "ASK";
-        state->remote_state = COMBRIEF_REMOTE_IDLE;
-        copy_bounded(state->primary_status, sizeof(state->primary_status), "waiting_user");
-        state->decision_id[0] = '\0';
-        state->option_count = 0;
-        state->waiting_request_content = true;
-    } else if (status != NULL && strcmp(status, "offline") == 0) {
-        status_label = "OFF";
-        state->remote_state = COMBRIEF_REMOTE_IDLE;
-        copy_bounded(state->primary_status, sizeof(state->primary_status), "offline");
-        state->decision_id[0] = '\0';
-        state->option_count = 0;
-    } else {
-        state->remote_state = state->ble_connected ? COMBRIEF_REMOTE_IDLE : COMBRIEF_REMOTE_DISCONNECTED;
-        copy_bounded(state->primary_status, sizeof(state->primary_status), "idle");
-        state->decision_id[0] = '\0';
-        state->option_count = 0;
+    state->app_summary[0] = '\0';
+    for (i = 0; i < state->app_slot_count && i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        int written;
+        const char *label = state->app_slots[i].label[0] != '\0' ? state->app_slots[i].label : "CB";
+        const char *status = state->app_slots[i].status[0] != '\0' ? state->app_slots[i].status : "idle";
+
+        used = strlen(state->app_summary);
+        if (used >= sizeof(state->app_summary) - 1) {
+            break;
+        }
+        written = snprintf(
+            state->app_summary + used,
+            sizeof(state->app_summary) - used,
+            "%s%s [%s]",
+            used == 0 ? "" : "\n",
+            label,
+            display_status_label(status));
+        if (written <= 0 || (size_t)written >= sizeof(state->app_summary) - used) {
+            break;
+        }
+    }
+}
+
+bool combrief_app_state_set_app_slot(combrief_app_state_t *state, uint8_t index, const char *label, const char *status)
+{
+    if (state == NULL || index >= COMBRIEF_MAX_TRACKED_APPS || label == NULL || label[0] == '\0' || status == NULL || status[0] == '\0') {
+        return false;
     }
 
+    copy_bounded(state->app_slots[index].label, sizeof(state->app_slots[index].label), label);
+    copy_bounded(state->app_slots[index].status, sizeof(state->app_slots[index].status), status);
+    if (state->app_slot_count <= index) {
+        state->app_slot_count = (uint8_t)(index + 1);
+    }
+    combrief_app_state_rebuild_app_summary(state);
+    copy_bounded(state->primary_status, sizeof(state->primary_status), dominant_app_status(state));
+    return true;
+}
+
+void combrief_app_state_clear_app_slots(combrief_app_state_t *state)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    memset(state->app_slots, 0, sizeof(state->app_slots));
+    state->app_slot_count = 0;
+    state->app_summary[0] = '\0';
+}
+
+bool combrief_app_state_has_status(const combrief_app_state_t *state, const char *status)
+{
+    uint8_t i;
+
+    if (state == NULL || status == NULL || status[0] == '\0') {
+        return false;
+    }
+    for (i = 0; i < state->app_slot_count && i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        if (strcmp(state->app_slots[i].status, status) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void combrief_app_state_apply_fast_status(combrief_app_state_t *state, const char *label, const char *status)
+{
+    const char *safe_label = label != NULL && label[0] != '\0' ? label : "CB";
+    const char *safe_status = status != NULL && status[0] != '\0' ? status : "idle";
+    uint8_t i;
+    bool updated = false;
+
+    if (state == NULL) {
+        return;
+    }
+
+    for (i = 0; i < state->app_slot_count && i < COMBRIEF_MAX_TRACKED_APPS; i++) {
+        if (strcmp(state->app_slots[i].label, safe_label) == 0) {
+            copy_bounded(state->app_slots[i].status, sizeof(state->app_slots[i].status), safe_status);
+            updated = true;
+            break;
+        }
+    }
+    if (!updated) {
+        if (state->app_slot_count < COMBRIEF_MAX_TRACKED_APPS) {
+            (void)combrief_app_state_set_app_slot(state, state->app_slot_count, safe_label, safe_status);
+        } else {
+            copy_bounded(state->app_slots[COMBRIEF_MAX_TRACKED_APPS - 1].label, sizeof(state->app_slots[COMBRIEF_MAX_TRACKED_APPS - 1].label), safe_label);
+            copy_bounded(state->app_slots[COMBRIEF_MAX_TRACKED_APPS - 1].status, sizeof(state->app_slots[COMBRIEF_MAX_TRACKED_APPS - 1].status), safe_status);
+        }
+    }
+
+    state->remote_state = state->ble_connected ? COMBRIEF_REMOTE_IDLE : COMBRIEF_REMOTE_DISCONNECTED;
+    state->decision_id[0] = '\0';
+    state->option_count = 0;
     state->waiting_resolved = false;
-    state->waiting_request_content = status != NULL && strcmp(status, "waiting_user") == 0;
+    state->waiting_request_content = app_status_is_active(safe_status) && strcmp(safe_status, "waiting_user") == 0;
     state->display_mode = COMBRIEF_DISPLAY_SUMMARY;
     state->full_page = 0;
-    if (status != NULL && strcmp(status, "waiting_user") == 0) {
-        (void)snprintf(summary, sizeof(summary), "%s [%s]\nLoading...", safe_label, status_label);
-    } else {
-        (void)snprintf(summary, sizeof(summary), "%s [%s]", safe_label, status_label);
-    }
-    copy_bounded(state->app_summary, sizeof(state->app_summary), summary);
+    combrief_app_state_rebuild_app_summary(state);
+    copy_bounded(state->primary_status, sizeof(state->primary_status), safe_status);
 }
 
 void combrief_app_state_set_battery(combrief_app_state_t *state, uint8_t percent)

@@ -705,7 +705,7 @@ static bool extract_apps_summary(const char *json, char *out, size_t out_len)
     }
 
     cursor = apps + 1;
-    while (count < 2 && cursor < array_end && (cursor = strchr(cursor, '{')) != NULL && cursor < array_end) {
+    while (count < COMBRIEF_MAX_TRACKED_APPS && cursor < array_end && (cursor = strchr(cursor, '{')) != NULL && cursor < array_end) {
         const char *object_end = find_matching_json_container(cursor, '{', '}');
         if (object_end == NULL || object_end > array_end) {
             return false;
@@ -723,6 +723,50 @@ static bool extract_apps_summary(const char *json, char *out, size_t out_len)
     }
 
     return out[0] != '\0';
+}
+
+static bool apply_apps_to_state(combrief_app_state_t *state, const char *json)
+{
+    char app_label[25];
+    char app_status[32];
+    const char *apps;
+    const char *array_end;
+    const char *cursor;
+    uint8_t count = 0;
+
+    if (state == NULL || json == NULL) {
+        return false;
+    }
+
+    apps = value_after_key(json, "\"apps\"");
+    if (apps == NULL || *apps != '[') {
+        return false;
+    }
+    array_end = find_matching_json_container(apps, '[', ']');
+    if (array_end == NULL) {
+        return false;
+    }
+
+    combrief_app_state_clear_app_slots(state);
+    cursor = apps + 1;
+    while (count < COMBRIEF_MAX_TRACKED_APPS && cursor < array_end && (cursor = strchr(cursor, '{')) != NULL && cursor < array_end) {
+        const char *object_end = find_matching_json_container(cursor, '{', '}');
+        if (object_end == NULL || object_end > array_end) {
+            return false;
+        }
+
+        app_label[0] = '\0';
+        app_status[0] = '\0';
+        (void)extract_json_string_between(cursor, object_end, "\"label\"", app_label, sizeof(app_label));
+        (void)extract_json_string_between(cursor, object_end, "\"status\"", app_status, sizeof(app_status));
+        if (combrief_app_state_set_app_slot(state, count, app_label, app_status)) {
+            count++;
+        }
+
+        cursor = object_end + 1;
+    }
+
+    return count > 0;
 }
 
 static bool apply_state_message(combrief_app_state_t *state, const char *json)
@@ -758,6 +802,10 @@ static bool apply_state_message(combrief_app_state_t *state, const char *json)
     if (state->waiting_request_content && has_status && strcmp(status, "working") == 0) {
         return state_changed || has_summary;
     }
+    if (apply_apps_to_state(state, json)) {
+        state_changed = true;
+    }
+
     if (state->waiting_request_content && has_status) {
         state->waiting_request_content = false;
     }

@@ -191,19 +191,24 @@ static void set_blue_breathing_led(void)
 static bool status_is_waiting_user(const combrief_app_state_t *state)
 {
     return state != NULL && (
+        combrief_app_state_has_status(state, "waiting_user") ||
+        combrief_app_state_has_status(state, "waiting") ||
         strstr(state->primary_status, "waiting_user") != NULL ||
         strstr(state->primary_status, "waiting") != NULL ||
         strstr(state->primary_status, "需确认") != NULL ||
+        strstr(state->app_summary, "[ASK]") != NULL ||
         strstr(state->app_summary, "[需确认]") != NULL);
 }
 
 static bool status_is_working(const combrief_app_state_t *state)
 {
     return state != NULL && (
+        combrief_app_state_has_status(state, "working") ||
         strstr(state->primary_status, "WORKING") != NULL ||
         strstr(state->primary_status, "Working") != NULL ||
         strstr(state->primary_status, "working") != NULL ||
         strstr(state->primary_status, "工作中") != NULL ||
+        strstr(state->app_summary, "[WORK]") != NULL ||
         strstr(state->app_summary, "[工作中]") != NULL ||
         (state->remote_state != COMBRIEF_REMOTE_IDLE && state->remote_state != COMBRIEF_REMOTE_DISCONNECTED));
 }
