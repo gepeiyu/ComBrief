@@ -72,8 +72,10 @@ export class HardwareRuntime {
     return { ...this.transport.getStatus(), ...this.device };
   }
 
-  sendState(message: HardwareStateMessage): Promise<void> {
-    void this.sendFastStateBestEffort(this.fastStateFromState(message));
+  async sendState(message: HardwareStateMessage): Promise<void> {
+    if (!(message.skipFastWaitingUser && message.primaryStatus === 'waiting_user')) {
+      await this.sendFastStateBestEffort(this.fastStateFromState(message));
+    }
     return this.send(message);
   }
 

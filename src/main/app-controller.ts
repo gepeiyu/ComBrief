@@ -232,6 +232,9 @@ export class AppController {
         ? { primaryLabel: primaryApp.label }
         : {}),
       primaryStatus: primaryApp?.status ?? 'idle',
+      ...(primaryApp?.id === 'cursor' && primaryApp.status === 'waiting_user'
+        ? { skipFastWaitingUser: true }
+        : {}),
     };
   }
 

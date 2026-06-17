@@ -13,6 +13,25 @@ class FailingStartTransport extends MockHardwareTransport {
   }
 }
 
+class SlowFastStateTransport extends MockHardwareTransport {
+  fastStateStarted = false;
+  fastStateResolved = false;
+  private releaseFastState: (() => void) | null = null;
+
+  async sendFastState(signal: Parameters<MockHardwareTransport['sendFastState']>[0]): Promise<void> {
+    this.fastStateStarted = true;
+    await new Promise<void>((resolve) => {
+      this.releaseFastState = resolve;
+    });
+    await super.sendFastState(signal);
+    this.fastStateResolved = true;
+  }
+
+  release(): void {
+    this.releaseFastState?.();
+  }
+}
+
 function stateMessage(): HardwareStateMessage {
   return {
     protocol: 1,
@@ -173,6 +192,55 @@ describe('HardwareRuntime', () => {
     expect(transport.sentFastStates[0]).toMatchObject({
       label: 'C',
       status: 'working',
+    });
+  });
+
+  it('sends fast state before the reliable state message to avoid stale WORK overwrites', async () => {
+    const transport = new SlowFastStateTransport();
+    const runtime = new HardwareRuntime(transport);
+
+    await runtime.start();
+    const send = runtime.sendState({
+      protocol: 1,
+      type: 'state',
+      appSummary: 'CC [OK]\nC [OK]',
+      primary: 'claude-code',
+      primaryStatus: 'idle',
+    });
+
+    await Promise.resolve();
+    expect(transport.fastStateStarted).toBe(true);
+    expect(transport.sentMessages).toEqual([]);
+
+    transport.release();
+    await send;
+
+    expect(transport.fastStateResolved).toBe(true);
+    expect(transport.sentFastStates[0]).toMatchObject({ label: 'CC', status: 'idle' });
+    expect(transport.sentMessages[0]).toMatchObject({ type: 'state', primaryStatus: 'idle' });
+  });
+
+  it('does not send ASK fast state for non-request Cursor waiting state', async () => {
+    const transport = new MockHardwareTransport();
+    const runtime = new HardwareRuntime(transport);
+
+    await runtime.start();
+    await runtime.sendState({
+      protocol: 1,
+      type: 'state',
+      appSummary: 'CC [OK]\nC [ASK]',
+      primary: 'cursor',
+      primaryLabel: 'C',
+      primaryStatus: 'waiting_user',
+      skipFastWaitingUser: true,
+    });
+
+    expect(transport.sentFastStates).toEqual([]);
+    expect(transport.sentMessages).toHaveLength(1);
+    expect(transport.sentMessages[0]).toMatchObject({
+      type: 'state',
+      primary: 'cursor',
+      primaryStatus: 'waiting_user',
     });
   });
 

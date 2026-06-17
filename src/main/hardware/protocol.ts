@@ -80,6 +80,7 @@ export interface HardwareStateMessage {
   primary?: string;
   primaryLabel?: string;
   primaryStatus?: HardwareStatus;
+  skipFastWaitingUser?: boolean;
   ts?: number;
 }
 

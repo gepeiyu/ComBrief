@@ -61,6 +61,7 @@ describe('AppController hardware snapshots', () => {
       primary: 'cursor',
       primaryLabel: 'C',
       primaryStatus: 'waiting_user',
+      skipFastWaitingUser: true,
       appSummary: 'CC [WORK]\nC [ASK]',
     });
     expect(snapshot).not.toHaveProperty('apps');
